@@ -16,6 +16,12 @@
 #include "toml.h"
 #include "toml_utils.h"
 
+#define FUZZ 1
+
+#ifdef FUZZ
+    extern int g_start_interception;
+#endif
+
 struct pal_common_state g_pal_common_state;
 
 extern struct pal_initial_mem_range g_initial_mem_ranges[];
@@ -587,6 +593,10 @@ noreturn void pal_main(uint64_t instance_id,       /* current instance id */
         post_callback();
 
     pal_disable_early_memory_bookkeeping();
+#ifdef FUZZ
+    log_always("INIT DONE");
+    g_start_interception = 1;
+#endif
 
     /* Now we will start the execution */
     start_execution(arguments, final_environments);
