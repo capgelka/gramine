@@ -24,7 +24,8 @@ do_syscall:
     mov %r8, %r10
     mov %r9, %r8
     mov 8(%rsp), %r9
-    syscall
+// jmp do_syscall_wrapped
+   syscall
     ret
     .cfi_endproc
 
