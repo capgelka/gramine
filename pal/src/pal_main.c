@@ -19,6 +19,7 @@
 #define FUZZ 1
 
 #ifdef FUZZ
+#define FUZZER "FUZZER_ENGINE"
     extern int g_start_interception;
 #endif
 
@@ -594,8 +595,22 @@ noreturn void pal_main(uint64_t instance_id,       /* current instance id */
 
     pal_disable_early_memory_bookkeeping();
 #ifdef FUZZ
-    log_always("INIT DONE");
-    g_start_interception = 1;
+    {
+        log_always("INIT DONE");
+        size_t len = strlen(FUZZER);
+        int* offset = NULL;
+        char* c;
+        char** p;
+        for (p = (char**)final_environments; (c = *p) != NULL; ++p) {
+            // log_always("%s", c);
+            // log_always("-------");
+            if (strncmp(c, FUZZER, len) == 0 && c[len] == '=') {
+                // *offset = p - (char**)final_environments;
+               g_start_interception = 1;
+               break;
+            }
+        }
+    }
 #endif
 
     /* Now we will start the execution */

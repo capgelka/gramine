@@ -22,6 +22,9 @@
 #include "cpu.h"
 #include "pal.h"
 
+// extern int g_start_interception;
+// #define UNSUPPORTED_SYSCALL_EXAMPLE 334
+
 typedef struct pal_tcb PAL_TCB;
 
 #define PAL_LIBOS_TCB_SIZE 256
@@ -260,6 +263,9 @@ static inline uint64_t pal_context_get_retval(PAL_CONTEXT* context) {
 }
 
 static inline uint64_t pal_context_get_syscall(PAL_CONTEXT* context) {
+    // if (UNSUPPORTED_SYSCALL_EXAMPLE == context->rax) {
+    //     g_start_interception = 1;
+    // }
     return context->rax;
 }
 
