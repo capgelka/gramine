@@ -13,6 +13,12 @@
 #include "libos_thread.h"
 #include "linux_abi/errors.h"
 
+// #define FUZZ 1
+
+// #ifdef FUZZ
+//     extern int g_start_interception;
+// #endif
+
 typedef arch_syscall_arg_t (*six_args_syscall_t)(arch_syscall_arg_t, arch_syscall_arg_t,
                                                  arch_syscall_arg_t, arch_syscall_arg_t,
                                                  arch_syscall_arg_t, arch_syscall_arg_t);
@@ -32,6 +38,11 @@ noreturn void libos_emulate_syscall(PAL_CONTEXT* context) {
         ret = handle_libos_call(args[0], args[1], args[2]);
     } else {
         if (sysnr >= LIBOS_SYSCALL_BOUND || !libos_syscall_table[sysnr]) {
+// #ifdef FUZZ
+//             // this is temporal hack, need to find a better place
+//             g_start_interception = 1;
+//             log_debug("Fuzzer started");
+// #endif
             warn_unsupported_syscall(sysnr);
             ret = -ENOSYS;
             goto out;
