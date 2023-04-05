@@ -19,7 +19,7 @@
 #define FUZZ 1
 
 #ifdef FUZZ
-#define FUZZER "FUZZER_ENGINE"
+#define FUZZER "FUZZER"
     extern int g_start_interception;
 #endif
 
