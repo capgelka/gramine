@@ -16,6 +16,7 @@
 #define CLIENT_SOCK "/tmp/fuzz_client_sock"
 #define SERVER_SOCK "/tmp/fuzz_server_sock"
 #define BUFF_SIZE 100
+#define REGISTER_SIZE 8
  
 // typedef struct Driver FuzzDriver;
 
@@ -32,7 +33,7 @@ void on_enable()
 
 long do_syscall_wrapped(long nr, int num_args, ...)
 {
-	static int sock_fd = 0;
+	int sock_fd = 0;
     static struct sockaddr_un cl_addr;
     static struct sockaddr_un sv_addr;
     static int on_syscall = 0;
@@ -49,8 +50,32 @@ long do_syscall_wrapped(long nr, int num_args, ...)
 
 	if (g_start_interception && !on_syscall) {
 
+		// if (nr == SYS_write) {
+		// 	va_list ap_copy;
+	    // 	va_copy(ap_copy, ap);
+
+	    // 	long fd = va_arg(ap_copy, long);
+	    // 	va_end(ap_copy);
+
+	    // 	if (fd == 1 || fd == 2) {
+	    // 		goto internal_syscall;
+	    // 	}
+		// }
+
+		// if (nr == SYS_close) {
+		// 	va_list ap_copy;
+	    // 	va_copy(ap_copy, ap);
+
+	    // 	long fd = va_arg(ap_copy, long);
+	    // 	va_end(ap_copy);
+
+	    // 	if (fd == 0) {
+	    // 		goto internal_syscall;
+	    // 	}
+		// }
+
 		if (on_syscall || not_handle) {
-			goto passthrough_syscall;
+			goto internal_syscall;
 		}
 
 		// handle logs. We assume our programs doesn't
@@ -101,43 +126,6 @@ long do_syscall_wrapped(long nr, int num_args, ...)
 	    not_handle = 0;
 	    on_syscall = 1;
 
-		
-		if (!sock_fd) {
-			DO_SYSCALL_ORIG(unlink, CLIENT_SOCK);
-			sock_fd = DO_SYSCALL_ORIG(socket, AF_UNIX, SOCK_DGRAM, 0);
-			if (sock_fd < 0) {
-				DO_SYSCALL_ORIG(exit);
-			}
-
-			for (int i = 0; i < sizeof(struct sockaddr_un); i++) {
-		    	((char*)&cl_addr)[i] = 0;
-		    }
-
-		    cl_addr.sun_family = AF_UNIX;
-		    for (int i = 0; i <= sizeof(cl_addr.sun_path); i++) {
-		    	cl_addr.sun_path[i] = CLIENT_SOCK[i];
-		    }
-
-    	    ret = DO_SYSCALL_ORIG(
-		    	bind,
-		    	sock_fd,
-		    	(const struct sockaddr *) &cl_addr,
-	            sizeof(struct sockaddr_un)
-	        );
-
-		    if (ret < 0) {
-		        log_error("Server is down: %d", ret);
-		        log_error("Path: |%s|", cl_addr.sun_path);
-				DO_SYSCALL_ORIG(exit);
-			}
-
-	        sv_addr.sun_family = AF_UNIX;
-		    for (int i = 0; i < sizeof(cl_addr.sun_path); i++) {
-		    	sv_addr.sun_path[i] = SERVER_SOCK[i];
-		    }
-
-		}
-
 
 		// memset(&claddr, 0, sizeof(struct sockaddr_un));
 
@@ -174,12 +162,13 @@ long do_syscall_wrapped(long nr, int num_args, ...)
         //log_always("SYS: %ld, ARGS: %d, arg1: %ld", nr, num_args, va_arg(ap, char*));
     	va_list ap_fuzz;
     	va_copy(ap_fuzz, ap);
+    	char* buf = NULL;
         switch (nr)
 		{
 		    case SYS_read:
 		    {
 		        long fd = va_arg(ap_fuzz, long);
-		        char* buf = va_arg(ap_fuzz, char*);
+		        buf = va_arg(ap_fuzz, char*);
 		        size_t count = va_arg(ap_fuzz, size_t);
 		        snprintf(buff, BUFF_SIZE, "read,%ld,buff,%ld",
 		                 fd, count);
@@ -189,18 +178,18 @@ long do_syscall_wrapped(long nr, int num_args, ...)
 		    case SYS_write:
 		    {
 		        long fd = va_arg(ap_fuzz, long);
-		        const char* buf = va_arg(ap_fuzz, const char*);
+		        buf = va_arg(ap_fuzz, const char*);
 		        size_t count = va_arg(ap_fuzz, size_t);
-		        snprintf(buff, BUFF_SIZE, "write,%ld,buff,%ld",
-		                 fd, count);
+		        snprintf(buff, BUFF_SIZE, "write,%ld,buff,%ld,%s",
+		                 fd, count,buf);
 		        msg_len = strlen(buff);
 		        break;
     	    }
 		    case SYS_open:
 		    {
 		        const char* filename = va_arg(ap_fuzz, const char*);
-		        int flags = va_arg(ap_fuzz, int);
-		        mode_t mode = va_arg(ap_fuzz, mode_t);
+		        int flags = va_arg(ap_fuzz, long);
+		        mode_t mode = va_arg(ap_fuzz, long);
 		        snprintf(buff, BUFF_SIZE, "open,%s,%d,%d",
 		                 filename, flags, mode);
 		        msg_len = strlen(buff);
@@ -226,7 +215,7 @@ long do_syscall_wrapped(long nr, int num_args, ...)
 		    case SYS_pread64:
 		    {
 		        long fd = va_arg(ap_fuzz, long);
-		        char* buf = va_arg(ap_fuzz, char*);
+		        buf = va_arg(ap_fuzz, char*);
 		        size_t count = va_arg(ap_fuzz, size_t);
 		        off_t offset = va_arg(ap_fuzz, off_t);
 		        snprintf(buff, BUFF_SIZE, "pread,%ld,buff,%ld,%lld",
@@ -237,23 +226,86 @@ long do_syscall_wrapped(long nr, int num_args, ...)
 		    case SYS_pwrite64:
 		    {
 		        long fd = va_arg(ap_fuzz, long);
-		        const char* buf = va_arg(ap_fuzz, const char*);
+		        buf = va_arg(ap_fuzz, const char*);
 		        size_t count = va_arg(ap_fuzz, size_t);
 		        off_t offset = va_arg(ap_fuzz, off_t);
-		        snprintf(buff, BUFF_SIZE, "pwrite,%ld,buff,%ld,%lld",
-		                 fd, count, (long long)offset);
+		        snprintf(buff, BUFF_SIZE, "pwrite,%ld,buff,%ld,%lld,%s",
+		                 fd, count, (long long)offset, buf);
 		        msg_len = strlen(buff);
 		        break;
+		    }
+		    case SYS_fstat:
+		    {
+		        long fd = va_arg(ap_fuzz, long);
+		        buf = (char*) va_arg(ap_fuzz, const struct stat*);
+	            snprintf(buff, BUFF_SIZE, "fstat,%ld,buff", fd);
+	            msg_len = strlen(buff);
+	            break;
+		    }
+		    // case SYS_stat:
+		    // {
+            //     const char* filename = va_arg(ap_fuzz, const char*);
+		    //     buf = (char*) va_arg(ap_fuzz, const struct stat*);
+	        //     snprintf(buff, BUFF_SIZE, "stat,%s,buff", filename);
+	        //     msg_len = strlen(buff);
+	        //     break;
+		    // }
+		    case SYS_ftruncate:
+		    {
+		        long fd = va_arg(ap_fuzz, long);
+		        off_t size = va_arg(ap_fuzz, off_t);
+	            snprintf(buff, BUFF_SIZE, "ftruncate,%ld,%ld", fd, size);
+	            msg_len = strlen(buff);
+	            break;
 		    }
 		    default:
 		        // handle unrecognized syscall
 		        va_end(ap_fuzz);
-		        goto passthrough_syscall;
+		        log_always("Syscall %d is unsupported by GK", nr);
+		        goto internal_syscall;
 		        break;
 		}
 		log_always("Interception for %ld, args: %d", nr);
 		va_end(ap_fuzz);
 		log_always("MSG TO SEND %s", buff);
+
+				if (!sock_fd) {
+			DO_SYSCALL_ORIG(unlink, CLIENT_SOCK);
+			sock_fd = DO_SYSCALL_ORIG(socket, AF_UNIX, SOCK_DGRAM, 0);
+			if (sock_fd < 0) {
+				DO_SYSCALL_ORIG(exit);
+			}
+
+			for (int i = 0; i < sizeof(struct sockaddr_un); i++) {
+		    	((char*)&cl_addr)[i] = 0;
+		    }
+
+		    cl_addr.sun_family = AF_UNIX;
+		    for (int i = 0; i <= sizeof(cl_addr.sun_path); i++) {
+		    	cl_addr.sun_path[i] = CLIENT_SOCK[i];
+		    }
+
+    	    ret = DO_SYSCALL_ORIG(
+		    	bind,
+		    	sock_fd,
+		    	(const struct sockaddr *) &cl_addr,
+	            sizeof(struct sockaddr_un)
+	        );
+
+		    if (ret < 0) {
+		        log_error("Server is down: %d", ret);
+		        log_error("Path: |%s|", cl_addr.sun_path);
+				DO_SYSCALL_ORIG(exit);
+			}
+
+	        sv_addr.sun_family = AF_UNIX;
+		    for (int i = 0; i < sizeof(cl_addr.sun_path); i++) {
+		    	sv_addr.sun_path[i] = SERVER_SOCK[i];
+		    }
+
+		}
+
+
         ret = DO_SYSCALL_ORIG(
         	sendto, sock_fd,
         	buff, msg_len,
@@ -270,6 +322,11 @@ long do_syscall_wrapped(long nr, int num_args, ...)
 	    	buff[i] = 0;
 	    }
 
+	    // for (int i = 0; i < REGISTER_SIZE; i++) {
+        // 	log_always("-> %d ",
+        // 		((unsigned char*)buff)[i]
+        // 	);
+        // }
 
         ret = DO_SYSCALL_ORIG(
         	recvfrom, sock_fd, buff, BUFF_SIZE, 0, NULL, NULL
@@ -281,9 +338,36 @@ long do_syscall_wrapped(long nr, int num_args, ...)
             DO_SYSCALL_ORIG(exit);
         }
 
-		log_always("DONE: %ld", ((long*)buff)[0]);
+        DO_SYSCALL_ORIG(close, sock_fd);
+
+
+	    // for (int i = 0; i < REGISTER_SIZE; i++) {
+        // 	log_always("-> %d ",
+        // 		((unsigned char*)buff)[i]
+        // 	);
+        // }
+        log_always("RET SIZE: %ld", ret);
+        size_t offset = ret - REGISTER_SIZE;
+        if (offset > 0) {
+        	for (int i = 0; i < ret - REGISTER_SIZE; i++) {
+        		buf[i] = buff[i];
+        	}
+        } else {
+        	offset = 0;
+        }
+        char* buff2 = buff + offset;
+        long val = *(long*)buff2;
+        // log_always("buf: %p, new: %p, diff: %ld", buff, buff2,
+        // 	(long)buff2 - (long)buff
+        // );
+        // for (int i = 0; i < REGISTER_SIZE; i++) {
+        // 	log_always("-> %d | %d ",
+        // 		((unsigned char*)buff2)[i], ((unsigned char*)buff)[i]
+        // 	);
+        // }
+		log_always("DONE: %ld", val);
 		on_syscall = 0;
-		return ((long*)buff)[0];
+		return val;
 
 
 		// static FuzzDriver* driver = NULL;
@@ -293,8 +377,12 @@ long do_syscall_wrapped(long nr, int num_args, ...)
 	}
 
 passthrough_syscall:
-	
 	on_syscall = 0;
+
+internal_syscall:
+	// 	if (g_start_interception) {
+	// 	log_always("PASS111111111!!!");
+	// }
 
 	switch (num_args)
 	{
