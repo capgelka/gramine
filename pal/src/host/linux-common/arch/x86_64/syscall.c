@@ -50,6 +50,11 @@ long do_syscall_wrapped(long nr, int num_args, ...)
 
 	if (g_start_interception && !on_syscall) {
 
+		if (nr == SYS_exit) {
+			g_start_interception = 0;
+			goto internal_syscall;
+		}
+
 		// if (nr == SYS_write) {
 		// 	va_list ap_copy;
 	    // 	va_copy(ap_copy, ap);
@@ -57,7 +62,7 @@ long do_syscall_wrapped(long nr, int num_args, ...)
 	    // 	long fd = va_arg(ap_copy, long);
 	    // 	va_end(ap_copy);
 
-	    // 	if (fd == 1 || fd == 2) {
+	    // 	if (fd == 1 || fd == 2 || fd == 0) {
 	    // 		goto internal_syscall;
 	    // 	}
 		// }
@@ -181,7 +186,7 @@ long do_syscall_wrapped(long nr, int num_args, ...)
 		        buf = va_arg(ap_fuzz, const char*);
 		        size_t count = va_arg(ap_fuzz, size_t);
 		        snprintf(buff, BUFF_SIZE, "write,%ld,buff,%ld,%s",
-		                 fd, count,buf);
+		                 fd, count, buf);
 		        msg_len = strlen(buff);
 		        break;
     	    }
@@ -269,7 +274,7 @@ long do_syscall_wrapped(long nr, int num_args, ...)
 		va_end(ap_fuzz);
 		log_always("MSG TO SEND %s", buff);
 
-				if (!sock_fd) {
+		if (!sock_fd) {
 			DO_SYSCALL_ORIG(unlink, CLIENT_SOCK);
 			sock_fd = DO_SYSCALL_ORIG(socket, AF_UNIX, SOCK_DGRAM, 0);
 			if (sock_fd < 0) {
