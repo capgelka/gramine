@@ -409,11 +409,11 @@ int init_ipc_worker(void) {
 }
 
 void terminate_ipc_worker(void) {
-    set_pollable_event(&g_worker_thread->pollable_event);
+    // set_pollable_event(&g_worker_thread->pollable_event);
 
-    while (__atomic_load_n(&g_clear_on_worker_exit, __ATOMIC_ACQUIRE)) {
-        CPU_RELAX();
-    }
+    // while (__atomic_load_n(&g_clear_on_worker_exit, __ATOMIC_ACQUIRE)) {
+    //     CPU_RELAX();
+    // }
 
     put_thread(g_worker_thread);
     g_worker_thread = NULL;
