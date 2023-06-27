@@ -34,13 +34,13 @@ static int init_socket(struct sockaddr_un* cl_addr, struct sockaddr_un* sv_addr)
         abort();
     }
 
-    for (int i = 0; i < sizeof(struct sockaddr_un); i++) {
+    for (size_t i = 0; i < sizeof(struct sockaddr_un); i++) {
         ((char*)cl_addr)[i] = 0;
         ((char*)sv_addr)[i] = 0;
     }
 
     cl_addr->sun_family = AF_UNIX;
-    for (int i = 0; i <= sizeof(cl_addr->sun_path); i++) {
+    for (size_t i = 0; i <= sizeof(cl_addr->sun_path); i++) {
         cl_addr->sun_path[i] = CLIENT_SOCK[i];
     }
 
@@ -58,7 +58,7 @@ static int init_socket(struct sockaddr_un* cl_addr, struct sockaddr_un* sv_addr)
     }
 
     sv_addr->sun_family = AF_UNIX;
-    for (int i = 0; i < sizeof(sv_addr->sun_path); i++) {
+    for (size_t i = 0; i < sizeof(sv_addr->sun_path); i++) {
         sv_addr->sun_path[i] = SERVER_SOCK[i];
     }
     return sock_fd;
@@ -75,12 +75,9 @@ long do_syscall_wrapped(long nr, int num_args, ...)
     static int enable_hooks = 0;
     char buff[BUFF_SIZE] = {0};
 
-
     va_list ap;
     va_start(ap, num_args);
     int ret = 0;
-    int fuzz = 0;
-    int fuzz_ret = 0;
 
     if (g_start_interception && !on_syscall) {
 
