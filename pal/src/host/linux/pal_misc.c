@@ -45,6 +45,7 @@ int _PalSystemTimeQuery(uint64_t* out_usec) {
 
 int _PalRandomBitsRead(void* buffer, size_t size) {
     assert(g_rand_fd != -1);
+    log_always("!!!!! RANDOM FD: |%d|", g_rand_fd);
     int ret = read_all(g_rand_fd, buffer, size);
     if (ret < 0)
         return unix_to_pal_error(ret);

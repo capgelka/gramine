@@ -12,12 +12,13 @@
 #include <sys/un.h>
 #include <sys/types.h>
 #include <sys/syscall.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <fcntl.h>
 
 #define CLIENT_SOCK "/tmp/fuzz_client_sock"
 #define SERVER_SOCK "/tmp/fuzz_server_sock"
-#define BUFF_SIZE 100
+#define BUFF_SIZE 5000 // to be more than 4096
 #define REGISTER_SIZE 8
 #define DESCRIPTORS_TO_RESERVE 500
 #define SYSCALL_TO_SWITCH SYS_write
@@ -65,6 +66,18 @@ static int init_socket(struct sockaddr_un* cl_addr, struct sockaddr_un* sv_addr)
 }
 
 
+void show_stats(const struct stat* stats) {
+
+    // Print the file information
+    log_always("Size: %ld bytes\n", stats->st_size);
+    log_always("Permissions: %o\n", stats->st_mode);
+    log_always("Owner UID: %d\n", stats->st_uid);
+    log_always("Group GID: %d\n", stats->st_gid);
+    log_always("Last access: %ld\n", stats->st_atime);
+    log_always("Last modification: %ld\n", stats->st_mtime);
+    log_always("Last status change: %ld\n", stats->st_ctime);
+}
+
 long do_syscall_wrapped(long nr, int num_args, ...)
 {
     static int sock_fd = 0;
@@ -73,11 +86,29 @@ long do_syscall_wrapped(long nr, int num_args, ...)
     static int on_syscall = 0;
     static int not_handle = 0;
     static int enable_hooks = 0;
+    static int use_urandom = 0;
     char buff[BUFF_SIZE] = {0};
 
     va_list ap;
     va_start(ap, num_args);
     int ret = 0;
+
+    if (nr == SYS_open) {
+       va_list ap_copy;
+       va_copy(ap_copy, ap);
+
+       char* path = va_arg(ap_copy, char*);
+       va_end(ap_copy);
+
+       if (!strcmp(path, "/dev/urandom")) {
+          // log_always("Use Urandom!");
+          use_urandom = 1;
+          goto internal_syscall;
+       }
+       // else {
+       //     log_always("NOT RANDOM: %s", path);
+       // }
+   }
 
     if (g_start_interception && !on_syscall) {
 
@@ -86,6 +117,22 @@ long do_syscall_wrapped(long nr, int num_args, ...)
             goto internal_syscall;
         }
 
+        if (nr == SYS_open) {
+            va_list ap_copy;
+            va_copy(ap_copy, ap);
+
+            char* path = va_arg(ap_copy, char*);
+            va_end(ap_copy);
+
+            if (!strcmp(path, "/dev/urandom")) {
+               log_always("Use Urandom!");
+               use_urandom = 1;
+               goto internal_syscall;
+            }
+            else {
+                log_always("NOT RANDOM: %s", path);
+            }
+        }
 
         if (!enable_hooks && (nr == SYSCALL_TO_SWITCH)) {
             va_list ap_copy;
@@ -96,7 +143,7 @@ long do_syscall_wrapped(long nr, int num_args, ...)
                 enable_hooks = 1;
                 not_handle = 0;
                 on_syscall = 0;
-                log_always("Hooking enabled on syscall %ld\n", nr);
+                log_always("Hooking enabled on syscall %ld\n\n\n", nr);
                 va_end(ap_copy);
                 return 0;
             }
@@ -179,6 +226,10 @@ long do_syscall_wrapped(long nr, int num_args, ...)
             case SYS_read:
             {
                 long fd = va_arg(ap_fuzz, long);
+                if (fd == 3 && use_urandom) {
+                    log_always("skipping hook for urandom read");
+                    goto passthrough_syscall;
+                }
                 buf = va_arg(ap_fuzz, char*);
                 size_t count = va_arg(ap_fuzz, size_t);
                 snprintf(buff, BUFF_SIZE, "read,%ld,buff,%ld",
@@ -205,6 +256,18 @@ long do_syscall_wrapped(long nr, int num_args, ...)
                          filename, flags, mode);
                 msg_len = strlen(buff);
                 break;
+            }
+            case SYS_openat:
+            case SYS_openat2:
+            {
+                abort();
+               // const char* filename = va_arg(ap_fuzz, const char*);
+               // int flags = va_arg(ap_fuzz, long);
+               // mode_t mode = va_arg(ap_fuzz, long);
+               // snprintf(buff, BUFF_SIZE, "open,%s,%d,%d",
+               //          filename, flags, mode);
+               // msg_len = strlen(buff);
+               // break;
             }
             case SYS_close:
             {
@@ -368,6 +431,9 @@ long do_syscall_wrapped(long nr, int num_args, ...)
         long val = *(long*)buff2;
 
         log_always("Syscall result: %ld", val);
+        if (nr == SYS_fstat || nr == SYS_lstat || nr == SYS_stat) {
+            show_stats((struct stat*) buf);
+        }
         on_syscall = 0;
         return val;
 

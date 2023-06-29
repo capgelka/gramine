@@ -9,6 +9,7 @@
 #include "protected_files_internal.h"
 
 #include "api.h"
+#include <execinfo.h>
 
 /* Host callbacks */
 static pf_read_f     g_cb_read     = NULL;
@@ -1191,6 +1192,7 @@ pf_status_t pf_open(pf_handle_t handle, const char* path, uint64_t underlying_si
         return PF_STATUS_UNINITIALIZED;
 
     pf_status_t status;
+    //backtrace(NULL, 0);-
     *context = ipf_open(path, mode, create, handle, underlying_size, key, &status);
     return status;
 }
