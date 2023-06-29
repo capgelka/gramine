@@ -165,13 +165,16 @@ static int encrypted_file_internal_open(struct libos_encrypted_file* enc, PAL_HA
     }
 
     PAL_STREAM_ATTR pal_attr;
+    log_always("BEFORE REQUEST");
     ret = PalStreamAttributesQueryByHandle(pal_handle, &pal_attr);
+    log_always("AFTER_REQUEST");
     if (ret < 0) {
         log_warning("PalStreamAttributesQueryByHandle failed: %s", pal_strerror(ret));
         ret = pal_to_unix_errno(ret);
         goto out;
     }
     size_t size = pal_attr.pending_size;
+    log_error("SIZE::: !!!!! %zd", size);
 
     assert(strstartswith(enc->uri, URI_PREFIX_FILE));
     const char* path = enc->uri + static_strlen(URI_PREFIX_FILE);
