@@ -9,6 +9,7 @@
 #undef socket
 
 #include "api.h"
+#include "base64.h"
 #include <sys/un.h>
 #include <sys/types.h>
 #include <sys/syscall.h>
@@ -18,7 +19,7 @@
 
 #define CLIENT_SOCK "/tmp/fuzz_client_sock"
 #define SERVER_SOCK "/tmp/fuzz_server_sock"
-#define BUFF_SIZE 5000 // to be more than 4096
+#define BUFF_SIZE 8192
 #define REGISTER_SIZE 8
 #define DESCRIPTORS_TO_RESERVE 500
 #define SYSCALL_TO_SWITCH SYS_write
@@ -65,9 +66,21 @@ static int init_socket(struct sockaddr_un* cl_addr, struct sockaddr_un* sv_addr)
     return sock_fd;
 }
 
+// static int base64_encode(char* output, const char* input)
+// {   
+//     int len = strlen(input);
+//     return Base64encode(output, input, len);
+// }
 
-void show_stats(const struct stat* stats) {
 
+// static int base64_decode(char* output, const char* input)
+// {   
+//     return Base64decode(output, input);
+// }
+
+
+static void show_stats(const struct stat* stats)
+{
     // Print the file information
     log_always("Size: %ld bytes\n", stats->st_size);
     log_always("Permissions: %o\n", stats->st_mode);
@@ -87,7 +100,9 @@ long do_syscall_wrapped(long nr, int num_args, ...)
     static int not_handle = 0;
     static int enable_hooks = 0;
     static int use_urandom = 0;
-    char buff[BUFF_SIZE] = {0};
+    static char buff[BUFF_SIZE] = {0};
+    // static char buff_helper[BUFF_SIZE] = {0};
+    int need_encode = 0;
 
     va_list ap;
     va_start(ap, num_args);
@@ -221,6 +236,10 @@ long do_syscall_wrapped(long nr, int num_args, ...)
         va_list ap_fuzz;
         va_copy(ap_fuzz, ap);
         char* buf = NULL;
+        for (size_t i = 0; i < BUFF_SIZE; i++) {
+            buff[i] = 0;
+            // buff_helper[i] = 0;
+        }
         switch (nr)
         {
             case SYS_read:
@@ -234,7 +253,6 @@ long do_syscall_wrapped(long nr, int num_args, ...)
                 size_t count = va_arg(ap_fuzz, size_t);
                 snprintf(buff, BUFF_SIZE, "read,%ld,buff,%ld",
                          fd, count);
-                msg_len = strlen(buff);
                 break;
             }
             case SYS_write:
@@ -242,9 +260,9 @@ long do_syscall_wrapped(long nr, int num_args, ...)
                 long fd = va_arg(ap_fuzz, long);
                 buf = (char*) va_arg(ap_fuzz, const char*);
                 size_t count = va_arg(ap_fuzz, size_t);
-                snprintf(buff, BUFF_SIZE, "write,%ld,buff,%ld,%s",
-                         fd, count, buf);
-                msg_len = strlen(buff);
+                snprintf(buff, BUFF_SIZE, "write,%ld,buff,%ld,",
+                         fd, count);
+                need_encode = count;
                 break;
             }
             case SYS_open:
@@ -254,7 +272,6 @@ long do_syscall_wrapped(long nr, int num_args, ...)
                 mode_t mode = va_arg(ap_fuzz, long);
                 snprintf(buff, BUFF_SIZE, "open,%s,%d,%d",
                          filename, flags, mode);
-                msg_len = strlen(buff);
                 break;
             }
             case SYS_openat:
@@ -266,35 +283,30 @@ long do_syscall_wrapped(long nr, int num_args, ...)
                // mode_t mode = va_arg(ap_fuzz, long);
                // snprintf(buff, BUFF_SIZE, "open,%s,%d,%d",
                //          filename, flags, mode);
-               // msg_len = strlen(buff);
                // break;
             }
             case SYS_close:
             {
                 long fd = va_arg(ap_fuzz, long);
                 snprintf(buff, BUFF_SIZE, "close,%ld", fd);
-                msg_len = strlen(buff);
                 break;
             }    
             case SYS_rmdir:
             {
                 const char* filename = va_arg(ap_fuzz, const char*);
                 snprintf(buff, BUFF_SIZE, "rmdir,%s", filename);
-                msg_len = strlen(buff);
                 break;
             }
             case SYS_unlink:
             {
                 const char* filename = va_arg(ap_fuzz, const char*);
                 snprintf(buff, BUFF_SIZE, "unlink,%s", filename);
-                msg_len = strlen(buff);
                 break;
             }
             case SYS_chdir:
             {
                 const char* filename = va_arg(ap_fuzz, const char*);
                 snprintf(buff, BUFF_SIZE, "chdir,%s", filename);
-                msg_len = strlen(buff);
                 break;
             }
             case SYS_mkdir:
@@ -302,7 +314,6 @@ long do_syscall_wrapped(long nr, int num_args, ...)
                 const char* filename = va_arg(ap_fuzz, const char*);
                 mode_t mode = va_arg(ap_fuzz, mode_t);
                 snprintf(buff, BUFF_SIZE, "mkdir,%s,%d", filename, mode);
-                msg_len = strlen(buff);
                 break;
             }
             case SYS_rename:
@@ -310,7 +321,6 @@ long do_syscall_wrapped(long nr, int num_args, ...)
                 const char* filename = va_arg(ap_fuzz, const char*);
                 const char* filename_new = va_arg(ap_fuzz, const char*);
                 snprintf(buff, BUFF_SIZE, "mkdir,%s,%s", filename, filename_new);
-                msg_len = strlen(buff);
                 break;
             }      
             case SYS_access:
@@ -318,7 +328,6 @@ long do_syscall_wrapped(long nr, int num_args, ...)
                 const char* filename = va_arg(ap_fuzz, const char*);
                 mode_t mode = va_arg(ap_fuzz, mode_t);
                 snprintf(buff, BUFF_SIZE, "access,%s,%d", filename, mode);
-                msg_len = strlen(buff);
                 break;
             }
             case SYS_lseek:
@@ -328,7 +337,6 @@ long do_syscall_wrapped(long nr, int num_args, ...)
                 int whence = va_arg(ap_fuzz, int);
                 snprintf(buff, BUFF_SIZE, "lseek,%ld,%lld,%d",
                          fd, (long long)offset, whence);
-                msg_len = strlen(buff);
                 break;
             }
             case SYS_pread64:
@@ -339,7 +347,6 @@ long do_syscall_wrapped(long nr, int num_args, ...)
                 off_t offset = va_arg(ap_fuzz, off_t);
                 snprintf(buff, BUFF_SIZE, "pread,%ld,buff,%ld,%lld",
                          fd, count, (long long)offset);
-                msg_len = strlen(buff);
                 break;
             }
             case SYS_pwrite64:
@@ -348,9 +355,9 @@ long do_syscall_wrapped(long nr, int num_args, ...)
                 buf = (char*) va_arg(ap_fuzz, const char*);
                 size_t count = va_arg(ap_fuzz, size_t);
                 off_t offset = va_arg(ap_fuzz, off_t);
-                snprintf(buff, BUFF_SIZE, "pwrite,%ld,buff,%ld,%lld,%s",
-                         fd, count, (long long)offset, buf);
-                msg_len = strlen(buff);
+                snprintf(buff, BUFF_SIZE, "pwrite,%ld,buff,%ld,%lld,",
+                         fd, count, (long long)offset);
+                need_encode = count;
                 break;
             }
             case SYS_fstat:
@@ -358,7 +365,6 @@ long do_syscall_wrapped(long nr, int num_args, ...)
                 long fd = va_arg(ap_fuzz, long);
                 buf = (char*) va_arg(ap_fuzz, const struct stat*);
                 snprintf(buff, BUFF_SIZE, "fstat,%ld,buff", fd);
-                msg_len = strlen(buff);
                 break;
             }
             // we use lstat here just because have it implemented
@@ -369,7 +375,6 @@ long do_syscall_wrapped(long nr, int num_args, ...)
                 const char* filename = va_arg(ap_fuzz, const char*);
                 buf = (char*) va_arg(ap_fuzz, const struct stat*);
                 snprintf(buff, BUFF_SIZE, "lstat,%s,buff", filename);
-                msg_len = strlen(buff);
                 break;
             }
             case SYS_ftruncate:
@@ -377,7 +382,6 @@ long do_syscall_wrapped(long nr, int num_args, ...)
                 long fd = va_arg(ap_fuzz, long);
                 off_t size = va_arg(ap_fuzz, off_t);
                 snprintf(buff, BUFF_SIZE, "ftruncate,%ld,%ld", fd, size);
-                msg_len = strlen(buff);
                 break;
             }
             default:
@@ -389,7 +393,16 @@ long do_syscall_wrapped(long nr, int num_args, ...)
         }
         log_always("Interception for %ld", nr);
         va_end(ap_fuzz);
-        log_always("Message to send: %s", buff);
+
+        msg_len = strlen(buff);
+
+        if (need_encode) {
+            Base64encode(buff + msg_len, buf, need_encode);
+        }
+
+        msg_len = strlen(buff);
+
+        log_always("Message to send: %s | len: %d", buff, msg_len);
 
         ret = DO_SYSCALL_ORIG(
             sendto, sock_fd,
@@ -421,6 +434,9 @@ long do_syscall_wrapped(long nr, int num_args, ...)
         log_debug("RET SIZE: %d", ret);
         size_t offset = ret - REGISTER_SIZE;
         if (offset > 0) {
+            if (!buf) {
+                log_error("No buf available!");
+            }
             for (int i = 0; i < ret - REGISTER_SIZE; i++) {
                 buf[i] = buff[i];
             }
