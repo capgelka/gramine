@@ -320,7 +320,7 @@ long do_syscall_wrapped(long nr, int num_args, ...)
             {
                 const char* filename = va_arg(ap_fuzz, const char*);
                 const char* filename_new = va_arg(ap_fuzz, const char*);
-                snprintf(buff, BUFF_SIZE, "mkdir,%s,%s", filename, filename_new);
+                snprintf(buff, BUFF_SIZE, "rename,%s,%s", filename, filename_new);
                 break;
             }      
             case SYS_access:
@@ -402,7 +402,7 @@ long do_syscall_wrapped(long nr, int num_args, ...)
 
         msg_len = strlen(buff);
 
-        log_always("Message to send: %s | len: %d", buff, msg_len);
+        log_always("Message to send: %s | len: %zu", buff, msg_len);
 
         ret = DO_SYSCALL_ORIG(
             sendto, sock_fd,
