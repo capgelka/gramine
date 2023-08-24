@@ -384,6 +384,20 @@ long do_syscall_wrapped(long nr, int num_args, ...)
                 snprintf(buff, BUFF_SIZE, "ftruncate,%ld,%ld", fd, size);
                 break;
             }
+            case SYS_fchmod:
+            {
+                long fd = va_arg(ap_fuzz, long);
+                mode_t mode = va_arg(ap_fuzz, mode_t);
+                snprintf(buff, BUFF_SIZE, "fchmod,%ld,%u", fd, mode);
+                break;
+            }
+            case SYS_chmod:
+            {
+                const char* filename = va_arg(ap_fuzz, const char*);
+                mode_t mode = va_arg(ap_fuzz, mode_t);
+                snprintf(buff, BUFF_SIZE, "chmod,%s,%u", filename, mode);
+                break;
+            }
             default:
                 // handle unrecognized syscall
                 va_end(ap_fuzz);
