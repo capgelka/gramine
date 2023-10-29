@@ -32,7 +32,7 @@
  * the GS register value, so we disable stack protector here (even though it is mostly inlined) */
 __attribute_no_stack_protector
 static inline int pal_set_tcb(PAL_TCB* tcb) {
-    return DO_SYSCALL(arch_prctl, ARCH_SET_GS, tcb);
+    return DO_SYSCALL_ORIG(arch_prctl, ARCH_SET_GS, tcb);
 }
 
 #endif /* IN_PAL */
