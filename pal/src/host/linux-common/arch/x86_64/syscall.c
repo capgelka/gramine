@@ -91,7 +91,7 @@ static void show_stats(const struct stat* stats)
     log_always("Last status change: %ld\n", stats->st_ctime);
 }
 
-long do_syscall_wrapped(long nr, int num_args, ...)
+inline long do_syscall_wrapped(long nr, int num_args, ...)
 {
     static int sock_fd = 0;
     static struct sockaddr_un cl_addr;
@@ -102,10 +102,11 @@ long do_syscall_wrapped(long nr, int num_args, ...)
     static int use_urandom = 0;
     static char buff[BUFF_SIZE] = {0};
     // static char buff_helper[BUFF_SIZE] = {0};
-    int need_encode = 0;
 
     va_list ap;
     va_start(ap, num_args);
+    //goto internal_syscall;
+    int need_encode = 0;
     int ret = 0;
 
     if (nr == SYS_open) {
@@ -473,58 +474,71 @@ passthrough_syscall:
     on_syscall = 0;
 
 internal_syscall:
-
+    long arg1, arg2, arg3, arg4, arg5, arg6 = 0;
     switch (num_args)
     {
         case 0:
-            ret = DO_SYSCALL_ORIG_BY_NUM(nr);
+            ret = DO_SYSCALL_0(nr);
             break;
         case 1:
-            ret = DO_SYSCALL_ORIG_BY_NUM(nr, va_arg(ap, long));
+            ret = DO_SYSCALL_1(nr, va_arg(ap, long));
             break;
         case 2:
-            ret = DO_SYSCALL_ORIG_BY_NUM(
+            arg1 = va_arg(ap, long);
+            arg2 = va_arg(ap, long);
+            ret = DO_SYSCALL_2(
                 nr,
-                va_arg(ap, long),
-                va_arg(ap, long)
+                arg1,
+                arg2
             );
             break;
         case 3:
-            ret = DO_SYSCALL_ORIG_BY_NUM(
+            arg1 = va_arg(ap, long);
+            arg2 = va_arg(ap, long);
+            arg3 = va_arg(ap, long);
+            ret = DO_SYSCALL_3(
                 nr,
-                va_arg(ap, long),
-                va_arg(ap, long),
-                va_arg(ap, long)
+                arg1,
+                arg2,
+                arg3
             );
             break;
         case 4:
-            ret = DO_SYSCALL_ORIG_BY_NUM(
+            arg1 = va_arg(ap, long);
+            arg2 = va_arg(ap, long);
+            arg3 = va_arg(ap, long);
+            arg4 = va_arg(ap, long);
+            ret = DO_SYSCALL_4(
                 nr,
-                va_arg(ap, long),
-                va_arg(ap, long),
-                va_arg(ap, long),
-                va_arg(ap, long)
+                arg1,
+                arg2,
+                arg3,
+                arg4
             );
             break;
         case 5:
-            ret = DO_SYSCALL_ORIG_BY_NUM(
-                nr,
-                va_arg(ap, long),
-                va_arg(ap, long),
-                va_arg(ap, long),
-                va_arg(ap, long),
-                va_arg(ap, long)
-            );
+            arg1 = va_arg(ap, long);
+            arg2 = va_arg(ap, long);
+            arg3 = va_arg(ap, long);
+            arg4 = va_arg(ap, long);
+            arg5 = va_arg(ap, long);
+            ret = DO_SYSCALL_5(nr, arg1, arg2, arg3, arg4, arg5);
             break;
         case 6:
-            ret = DO_SYSCALL_ORIG_BY_NUM(
+            arg1 = va_arg(ap, long);
+            arg2 = va_arg(ap, long);
+            arg3 = va_arg(ap, long);
+            arg4 = va_arg(ap, long);
+            arg5 = va_arg(ap, long);
+            arg6 = va_arg(ap, long);
+            ret = DO_SYSCALL_6(
                 nr,
-                va_arg(ap, long),
-                va_arg(ap, long),
-                va_arg(ap, long),
-                va_arg(ap, long),
-                va_arg(ap, long),
-                va_arg(ap, long)
+                arg1,
+                arg2,
+                arg3,
+                arg4,
+                arg5,
+                arg6
             );
             break;
     }
