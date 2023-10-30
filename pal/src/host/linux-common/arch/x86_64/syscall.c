@@ -21,7 +21,7 @@
 #define SERVER_SOCK "/tmp/fuzz_server_sock"
 #define BUFF_SIZE 8192
 #define REGISTER_SIZE 8
-#define DESCRIPTORS_TO_RESERVE 500
+#define DESCRIPTORS_TO_RESERVE 50
 #define SYSCALL_TO_SWITCH SYS_write
 #define ARG_TO_SWITCH "message1234"
 
@@ -66,19 +66,6 @@ static int init_socket(struct sockaddr_un* cl_addr, struct sockaddr_un* sv_addr)
     return sock_fd;
 }
 
-// static int base64_encode(char* output, const char* input)
-// {   
-//     int len = strlen(input);
-//     return Base64encode(output, input, len);
-// }
-
-
-// static int base64_decode(char* output, const char* input)
-// {   
-//     return Base64decode(output, input);
-// }
-
-
 static void show_stats(const struct stat* stats)
 {
     // Print the file information
@@ -101,11 +88,11 @@ inline long do_syscall_wrapped(long nr, int num_args, ...)
     static int enable_hooks = 0;
     static int use_urandom = 0;
     static char buff[BUFF_SIZE] = {0};
-    // static char buff_helper[BUFF_SIZE] = {0};
+    static int dst[DESCRIPTORS_TO_RESERVE] = {0};
 
     va_list ap;
     va_start(ap, num_args);
-    //goto internal_syscall;
+
     int need_encode = 0;
     int ret = 0;
 
@@ -208,7 +195,6 @@ inline long do_syscall_wrapped(long nr, int num_args, ...)
 
         if (!sock_fd) {
             int count = DESCRIPTORS_TO_RESERVE;
-            int dst[DESCRIPTORS_TO_RESERVE] = {0};
             while (count-->0) {
                 dst[count - 1] = DO_SYSCALL_ORIG(
                     open, "/tmp/tmpp",
@@ -239,7 +225,6 @@ inline long do_syscall_wrapped(long nr, int num_args, ...)
         char* buf = NULL;
         for (size_t i = 0; i < BUFF_SIZE; i++) {
             buff[i] = 0;
-            // buff_helper[i] = 0;
         }
         switch (nr)
         {
