@@ -22,8 +22,7 @@
 #include "cpu.h"
 #include "pal.h"
 
-// extern int g_start_interception;
-// #define UNSUPPORTED_SYSCALL_EXAMPLE 334
+extern int g_start_interception;
 
 typedef struct pal_tcb PAL_TCB;
 

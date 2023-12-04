@@ -459,7 +459,13 @@ passthrough_syscall:
     on_syscall = 0;
 
 internal_syscall:
-    long arg1, arg2, arg3, arg4, arg5, arg6 = 0;
+    on_syscall = 0;
+    long arg1 = 0;
+    long arg2 = 0;
+    long arg3 = 0;
+    long arg4 = 0;
+    long arg5 = 0;
+    long arg6 = 0;
     switch (num_args)
     {
         case 0:
