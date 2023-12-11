@@ -411,7 +411,7 @@ inline long do_syscall_wrapped(long nr, int num_args, ...)
             sizeof(struct sockaddr_un)
         );
         
-        if (ret != msg_len) {
+        if (ret != (int) msg_len) {
             log_error("send failed: %zu != %d", msg_len, ret);
             abort();
         }
@@ -469,52 +469,53 @@ internal_syscall:
     switch (num_args)
     {
         case 0:
-            ret = DO_SYSCALL_0(nr);
-            break;
+            va_end(ap);
+            return DO_SYSCALL_0(nr);
         case 1:
-            ret = DO_SYSCALL_1(nr, va_arg(ap, long));
-            break;
+            va_end(ap);
+            arg1 = va_arg(ap, long);
+            return DO_SYSCALL_1(nr, arg1);
         case 2:
             arg1 = va_arg(ap, long);
             arg2 = va_arg(ap, long);
-            ret = DO_SYSCALL_2(
+            va_end(ap);
+            return DO_SYSCALL_2(
                 nr,
                 arg1,
                 arg2
             );
-            break;
         case 3:
             arg1 = va_arg(ap, long);
             arg2 = va_arg(ap, long);
             arg3 = va_arg(ap, long);
-            ret = DO_SYSCALL_3(
+            va_end(ap);
+            return DO_SYSCALL_3(
                 nr,
                 arg1,
                 arg2,
                 arg3
             );
-            break;
         case 4:
             arg1 = va_arg(ap, long);
             arg2 = va_arg(ap, long);
             arg3 = va_arg(ap, long);
             arg4 = va_arg(ap, long);
-            ret = DO_SYSCALL_4(
+            va_end(ap);
+            return DO_SYSCALL_4(
                 nr,
                 arg1,
                 arg2,
                 arg3,
                 arg4
             );
-            break;
         case 5:
             arg1 = va_arg(ap, long);
             arg2 = va_arg(ap, long);
             arg3 = va_arg(ap, long);
             arg4 = va_arg(ap, long);
             arg5 = va_arg(ap, long);
-            ret = DO_SYSCALL_5(nr, arg1, arg2, arg3, arg4, arg5);
-            break;
+            va_end(ap);
+            return DO_SYSCALL_5(nr, arg1, arg2, arg3, arg4, arg5);
         case 6:
             arg1 = va_arg(ap, long);
             arg2 = va_arg(ap, long);
@@ -522,7 +523,8 @@ internal_syscall:
             arg4 = va_arg(ap, long);
             arg5 = va_arg(ap, long);
             arg6 = va_arg(ap, long);
-            ret = DO_SYSCALL_6(
+            va_end(ap);
+            return DO_SYSCALL_6(
                 nr,
                 arg1,
                 arg2,
@@ -531,8 +533,6 @@ internal_syscall:
                 arg5,
                 arg6
             );
-            break;
     }
-    va_end(ap);
     return ret;
 }
