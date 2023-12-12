@@ -18,6 +18,7 @@
 #include "libos_types.h"
 #include "libos_utils.h"
 #include "list.h"
+#include "log.h"
 #include "pal.h"
 
 #define LOG_PREFIX "IPC worker: "
@@ -409,8 +410,8 @@ int init_ipc_worker(void) {
 }
 
 void terminate_ipc_worker(void) {
+    log_always("TERMINATING IPC WORKER....");
     // set_pollable_event(&g_worker_thread->pollable_event);
-
     // while (__atomic_load_n(&g_clear_on_worker_exit, __ATOMIC_ACQUIRE)) {
     //     CPU_RELAX();
     // }
@@ -419,4 +420,5 @@ void terminate_ipc_worker(void) {
     g_worker_thread = NULL;
     PalObjectDestroy(g_self_ipc_handle);
     g_self_ipc_handle = NULL;
+    log_always("TERMINATED");
 }
