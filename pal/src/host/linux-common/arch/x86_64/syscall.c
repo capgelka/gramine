@@ -42,7 +42,7 @@ static int init_socket(struct sockaddr_un* cl_addr, struct sockaddr_un* sv_addr)
     }
 
     cl_addr->sun_family = AF_UNIX;
-    for (size_t i = 0; i <= sizeof(cl_addr->sun_path); i++) {
+    for (size_t i = 0; i < sizeof(CLIENT_SOCK); i++) {
         cl_addr->sun_path[i] = CLIENT_SOCK[i];
     }
 
@@ -60,7 +60,7 @@ static int init_socket(struct sockaddr_un* cl_addr, struct sockaddr_un* sv_addr)
     }
 
     sv_addr->sun_family = AF_UNIX;
-    for (size_t i = 0; i < sizeof(sv_addr->sun_path); i++) {
+    for (size_t i = 0; i < sizeof(SERVER_SOCK); i++) {
         sv_addr->sun_path[i] = SERVER_SOCK[i];
     }
     return sock_fd;
@@ -78,11 +78,12 @@ static void show_stats(const struct stat* stats)
     log_always("Last status change: %ld\n", stats->st_ctime);
 }
 
+__attribute__((no_stack_protector))
 inline long do_syscall_wrapped(long nr, int num_args, ...)
 {
     static int sock_fd = 0;
-    static struct sockaddr_un cl_addr;
-    static struct sockaddr_un sv_addr;
+    static struct sockaddr_un cl_addr = { .sun_family = AF_UNIX };
+    static struct sockaddr_un sv_addr = { .sun_family = AF_UNIX };
     static int on_syscall = 0;
     static int not_handle = 0;
     static int enable_hooks = 0;
@@ -196,7 +197,7 @@ inline long do_syscall_wrapped(long nr, int num_args, ...)
         if (!sock_fd) {
             int count = DESCRIPTORS_TO_RESERVE;
             while (count-->0) {
-                dst[count - 1] = DO_SYSCALL_ORIG(
+                dst[count] = DO_SYSCALL_ORIG(
                     open, "/tmp/tmpp",
                     O_RDWR | O_CREAT,
                     0777
