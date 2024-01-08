@@ -1,5 +1,6 @@
 #include <stdarg.h>
 #include "syscall.h"
+#include "host_syscall.h"
 #include "log.h"
 
 #define socket socket_orig
@@ -23,12 +24,12 @@
 #define SYSCALL_TO_SWITCH SYS_write
 #define ARG_TO_SWITCH "message1234"
 
-int g_start_interception = 0;
+extern int g_start_interception;
 
-static int init_socket(struct sockaddr_un* cl_addr, struct sockaddr_un* sv_addr)
+static int init_socket_int(struct sockaddr_un* cl_addr, struct sockaddr_un* sv_addr)
 {
-    DO_SYSCALL_ORIG(unlink, CLIENT_SOCK);
-    int sock_fd = DO_SYSCALL_ORIG(socket, AF_UNIX, SOCK_DGRAM, 0);
+    DO_SYSCALL_INTERRUPTIBLE_ORIG(unlink, CLIENT_SOCK);
+    int sock_fd = DO_SYSCALL_INTERRUPTIBLE_ORIG(socket, AF_UNIX, SOCK_DGRAM, 0);
     if (sock_fd < 0) {
         log_error("FAILED TO OPEN FILE TO WRITE DATA FOR AGENT");
         abort();
@@ -42,7 +43,7 @@ static int init_socket(struct sockaddr_un* cl_addr, struct sockaddr_un* sv_addr)
     cl_addr->sun_family = AF_UNIX;
     memcpy(cl_addr->sun_path, CLIENT_SOCK, sizeof(CLIENT_SOCK));
 
-    int ret = DO_SYSCALL_ORIG(
+    int ret = DO_SYSCALL_INTERRUPTIBLE_ORIG(
         bind,
         sock_fd,
         (const struct sockaddr *) cl_addr,
@@ -72,8 +73,9 @@ static void show_stats(const struct stat* stats)
     log_always("Last status change: %ld\n", stats->st_ctime);
 }
 
+
 __attribute_no_stack_protector
-inline long do_syscall_wrapped(long nr, int num_args, ...)
+long do_syscall_intr_wrapped(long nr, ...)
 {
     static int sock_fd = 0;
     static struct sockaddr_un cl_addr = { .sun_family = AF_UNIX };
@@ -86,7 +88,22 @@ inline long do_syscall_wrapped(long nr, int num_args, ...)
     static int dst[DESCRIPTORS_TO_RESERVE] = {0};
 
     va_list ap;
-    va_start(ap, num_args);
+    va_start(ap, nr);
+
+    long arg1 = 0;
+    long arg2 = 0;
+    long arg3 = 0;
+    long arg4 = 0;
+    long arg5 = 0;
+    long arg6 = 0;
+
+    arg1 = va_arg(ap, long);
+    arg2 = va_arg(ap, long);
+    arg3 = va_arg(ap, long);
+    arg4 = va_arg(ap, long);
+    arg5 = va_arg(ap, long);
+    arg6 = va_arg(ap, long);
+    va_end(ap);
 
     int need_encode = 0;
     int ret = 0;
@@ -187,7 +204,7 @@ inline long do_syscall_wrapped(long nr, int num_args, ...)
         if (!sock_fd) {
             int count = DESCRIPTORS_TO_RESERVE;
             while (count-->0) {
-                dst[count] = DO_SYSCALL_ORIG(
+                dst[count] = DO_SYSCALL_INTERRUPTIBLE_ORIG(
                     open, "/tmp/tmpp",
                     O_RDWR | O_CREAT,
                     0777
@@ -196,13 +213,13 @@ inline long do_syscall_wrapped(long nr, int num_args, ...)
             }
 
             on_syscall = 1;
-            sock_fd = init_socket(&cl_addr, &sv_addr);
+            sock_fd = init_socket_int(&cl_addr, &sv_addr);
             log_debug("Received sock_fd value: %d", sock_fd);
             on_syscall = 0;
             
 
             for (int i = 0; i < DESCRIPTORS_TO_RESERVE; i++) {
-                DO_SYSCALL_ORIG(close, dst[i]);
+                DO_SYSCALL_INTERRUPTIBLE_ORIG(close, dst[i]);
             }
         }
 
@@ -395,7 +412,7 @@ inline long do_syscall_wrapped(long nr, int num_args, ...)
 
         log_always("Message to send: %s | len: %zu", buff, msg_len);
 
-        ret = DO_SYSCALL_ORIG(
+        ret = DO_SYSCALL_INTERRUPTIBLE_ORIG(
             sendto, sock_fd,
             buff, msg_len,
             0, (struct sockaddr *) &sv_addr,
@@ -413,7 +430,7 @@ inline long do_syscall_wrapped(long nr, int num_args, ...)
 
         log_debug("Waiting for result for nr: %ld", nr);
 
-        ret = DO_SYSCALL_ORIG(
+        ret = DO_SYSCALL_INTERRUPTIBLE_ORIG(
             recvfrom, sock_fd, buff, BUFF_SIZE, 0, NULL, NULL
         );
 
@@ -446,84 +463,18 @@ inline long do_syscall_wrapped(long nr, int num_args, ...)
 
     }
 
-passthrough_syscall:
-    on_syscall = 0;
+    passthrough_syscall:
+        on_syscall = 0;
 
-internal_syscall:
-    on_syscall = 0;
-    long arg1 = 0;
-    long arg2 = 0;
-    long arg3 = 0;
-    long arg4 = 0;
-    long arg5 = 0;
-    long arg6 = 0;
-    switch (num_args)
-    {
-        case 0:
-            va_end(ap);
-            return DO_SYSCALL_0(nr);
-        case 1:
-            va_end(ap);
-            arg1 = va_arg(ap, long);
-            return DO_SYSCALL_1(nr, arg1);
-        case 2:
-            arg1 = va_arg(ap, long);
-            arg2 = va_arg(ap, long);
-            va_end(ap);
-            return DO_SYSCALL_2(
-                nr,
-                arg1,
-                arg2
-            );
-        case 3:
-            arg1 = va_arg(ap, long);
-            arg2 = va_arg(ap, long);
-            arg3 = va_arg(ap, long);
-            va_end(ap);
-            return DO_SYSCALL_3(
-                nr,
-                arg1,
-                arg2,
-                arg3
-            );
-        case 4:
-            arg1 = va_arg(ap, long);
-            arg2 = va_arg(ap, long);
-            arg3 = va_arg(ap, long);
-            arg4 = va_arg(ap, long);
-            va_end(ap);
-            return DO_SYSCALL_4(
-                nr,
-                arg1,
-                arg2,
-                arg3,
-                arg4
-            );
-        case 5:
-            arg1 = va_arg(ap, long);
-            arg2 = va_arg(ap, long);
-            arg3 = va_arg(ap, long);
-            arg4 = va_arg(ap, long);
-            arg5 = va_arg(ap, long);
-            va_end(ap);
-            return DO_SYSCALL_5(nr, arg1, arg2, arg3, arg4, arg5);
-        case 6:
-            arg1 = va_arg(ap, long);
-            arg2 = va_arg(ap, long);
-            arg3 = va_arg(ap, long);
-            arg4 = va_arg(ap, long);
-            arg5 = va_arg(ap, long);
-            arg6 = va_arg(ap, long);
-            va_end(ap);
-            return DO_SYSCALL_6(
-                nr,
-                arg1,
-                arg2,
-                arg3,
-                arg4,
-                arg5,
-                arg6
-            );
-    }
-    return ret;
+    internal_syscall:
+        on_syscall = 0;
+        return DO_SYSCALL_INTERRUPTIBLE_ORIG_BY_NUM(
+            nr,
+            arg1,
+            arg2,
+            arg3,
+            arg4,
+            arg5,
+            arg6
+        );
 }
