@@ -24,7 +24,7 @@
 #define SYSCALL_TO_SWITCH SYS_write
 #define ARG_TO_SWITCH "message1234"
 
-extern int g_start_interception;
+int g_start_interception_intr = 0;
 
 static int init_socket_int(struct sockaddr_un* cl_addr, struct sockaddr_un* sv_addr)
 {
@@ -121,10 +121,10 @@ long do_syscall_intr_wrapped(long nr, ...)
        }
    }
 
-    if (g_start_interception && !on_syscall) {
+    if (g_start_interception_intr && !on_syscall) {
 
         if (nr == SYS_exit) {
-            g_start_interception = 0;
+            g_start_interception_intr = 0;
             goto internal_syscall;
         }
 

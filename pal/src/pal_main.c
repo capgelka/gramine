@@ -20,7 +20,14 @@
 
 #ifdef FUZZ
 #define FUZZER "FUZZER"
-    extern int g_start_interception;
+
+#ifdef SETINTERCEPTION
+    int g_start_interception = 0;
+    extern int g_start_interception_intr;
+#else
+    // extern int g_start_interception;
+    int g_start_interception = 0;
+#endif
 #endif
 
 struct pal_common_state g_pal_common_state;
@@ -378,6 +385,8 @@ noreturn void pal_main(uint64_t instance_id,       /* current instance id */
                        const char** arguments,     /* application arguments */
                        const char** environments   /* environment variables */,
                        void (*post_callback)(void) /* callback into host-specific loader */) {
+    //log_always("CALLLED!");
+    //abort();
     if (!instance_id) {
         assert(!parent_process);
         if (_PalRandomBitsRead(&instance_id, sizeof(instance_id)) < 0) {

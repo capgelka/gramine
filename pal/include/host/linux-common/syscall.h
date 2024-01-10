@@ -50,7 +50,7 @@ noreturn void _PalThreadExit_asm_stub(uint32_t* thread_stack_spinlock, int* clea
         DO_SYSCALL_WRAPPED_##NARGS
 
 #define DO_SYSCALL(name, args...) \
-    PICK_SYSCALL_MACRO_WRAPPED(name, ##args, 6, 5, 4, 3, 2, 1, 0)(__NR_##name, ##args)
+    PICK_SYSCALL_MACRO(name, ##args, 6, 5, 4, 3, 2, 1, 0)(__NR_##name, ##args)
 
 #define DO_SYSCALL_ORIG(name, args...) \
     PICK_SYSCALL_MACRO(name, ##args, 6, 5, 4, 3, 2, 1, 0)(__NR_##name, ##args)

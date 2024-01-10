@@ -43,7 +43,7 @@ struct pal_enclave g_pal_enclave;
 static int read_file_fragment(int fd, void* buf, size_t size, off_t offset) {
     ssize_t ret;
 
-    ret = DO_SYSCALL(lseek, fd, offset, SEEK_SET);
+    ret = DO_SYSCALL_ORIG(lseek, fd, offset, SEEK_SET);
     if (ret < 0)
         return ret;
 
@@ -160,7 +160,7 @@ static int load_enclave_binary(sgx_arch_secs_t* secs, int fd, unsigned long base
             zeropage = zeroend;
 
         if (c->mapend > c->mapstart) {
-            void* addr = (void*)DO_SYSCALL(mmap, NULL, c->mapend - c->mapstart,
+            void* addr = (void*)DO_SYSCALL_ORIG(mmap, NULL, c->mapend - c->mapstart,
                                            PROT_READ | PROT_WRITE, MAP_PRIVATE, fd, c->mapoff);
 
             if (IS_PTR_ERR(addr)) {
@@ -179,7 +179,7 @@ static int load_enclave_binary(sgx_arch_secs_t* secs, int fd, unsigned long base
                                        SGX_PAGE_TYPE_REG, c->prot, /*skip_eextend=*/false,
                                        (c->prot & PROT_EXEC) ? "code" : "data");
 
-            DO_SYSCALL(munmap, addr, c->mapend - c->mapstart);
+            DO_SYSCALL_ORIG(munmap, addr, c->mapend - c->mapstart);
 
             if (ret < 0)
                 goto out;
@@ -212,7 +212,7 @@ static int get_enclave_token(sgx_arch_token_t* enclave_token, sgx_sigstruct_t* e
         goto out;
     }
 
-    token_fd = DO_SYSCALL(open, token_path, O_RDONLY | O_CLOEXEC, 0);
+    token_fd = DO_SYSCALL_ORIG(open, token_path, O_RDONLY | O_CLOEXEC, 0);
     if (token_fd < 0) {
         log_error("Cannot open token %s. Use gramine-sgx-get-token on the runtime host to create "
                   "the token file.", token_path);
@@ -230,7 +230,7 @@ static int get_enclave_token(sgx_arch_token_t* enclave_token, sgx_sigstruct_t* e
     ret = 0;
 out:
     if (token_fd >= 0)
-        DO_SYSCALL(close, token_fd);
+        DO_SYSCALL_ORIG(close, token_fd);
     free(token_path);
     return ret;
 }
@@ -260,7 +260,7 @@ static int initialize_enclave(struct pal_enclave* enclave, const char* manifest_
         return -ENOMEM;
     }
 
-    enclave_image = DO_SYSCALL(open, enclave->libpal_uri + URI_PREFIX_FILE_LEN,
+    enclave_image = DO_SYSCALL_ORIG(open, enclave->libpal_uri + URI_PREFIX_FILE_LEN,
                                O_RDONLY | O_CLOEXEC, 0);
     if (enclave_image < 0) {
         log_error("Cannot find enclave image: %s", enclave->libpal_uri);
@@ -280,7 +280,7 @@ static int initialize_enclave(struct pal_enclave* enclave, const char* manifest_
         goto out;
     }
 
-    sigfile_fd = DO_SYSCALL(open, sig_path, O_RDONLY | O_CLOEXEC, 0);
+    sigfile_fd = DO_SYSCALL_ORIG(open, sig_path, O_RDONLY | O_CLOEXEC, 0);
     if (sigfile_fd < 0) {
         log_error("Cannot open sigstruct file %s", sig_path);
         ret = -EINVAL;
@@ -362,7 +362,7 @@ static int initialize_enclave(struct pal_enclave* enclave, const char* manifest_
      * + enclave->thread_num for signal stack
      */
     areas_size = ALIGN_UP_POW2(sizeof(*areas) * (10 + enclave->thread_num * 2), PRESET_PAGESIZE);
-    areas = (struct mem_area*)DO_SYSCALL(mmap, NULL, areas_size, PROT_READ | PROT_WRITE,
+    areas = (struct mem_area*)DO_SYSCALL_ORIG(mmap, NULL, areas_size, PROT_READ | PROT_WRITE,
                                          MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (IS_PTR_ERR(areas)) {
         log_error("Allocating memory failed: %s", unix_strerror(PTR_TO_ERR(areas)));
@@ -497,7 +497,7 @@ static int initialize_enclave(struct pal_enclave* enclave, const char* manifest_
 
         void* data = NULL;
         if (areas[i].data_src != ZERO) {
-            data = (void*)DO_SYSCALL(mmap, NULL, areas[i].size, PROT_READ | PROT_WRITE,
+            data = (void*)DO_SYSCALL_ORIG(mmap, NULL, areas[i].size, PROT_READ | PROT_WRITE,
                                      MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
             if (IS_PTR_ERR(data) || data == NULL) {
                 /* Note that Gramine currently doesn't handle 0x0 addresses */
@@ -552,7 +552,7 @@ static int initialize_enclave(struct pal_enclave* enclave, const char* manifest_
                                    areas[i].desc);
 
         if (data)
-            DO_SYSCALL(munmap, data, areas[i].size);
+            DO_SYSCALL_ORIG(munmap, data, areas[i].size);
 
         if (ret < 0) {
             log_error("Adding pages (%s) to enclave failed: %s", areas[i].desc,
@@ -574,7 +574,7 @@ static int initialize_enclave(struct pal_enclave* enclave, const char* manifest_
         goto out;
     }
 
-    struct enclave_dbginfo* dbg = (void*)DO_SYSCALL(mmap, DBGINFO_ADDR,
+    struct enclave_dbginfo* dbg = (void*)DO_SYSCALL_ORIG(mmap, DBGINFO_ADDR,
                                                     sizeof(struct enclave_dbginfo),
                                                     PROT_READ | PROT_WRITE,
                                                     MAP_PRIVATE | MAP_ANONYMOUS
@@ -625,11 +625,11 @@ static int initialize_enclave(struct pal_enclave* enclave, const char* manifest_
 out:
     free(tcs_addrs);
     if (enclave_image >= 0)
-        DO_SYSCALL(close, enclave_image);
+        DO_SYSCALL_ORIG(close, enclave_image);
     if (sigfile_fd >= 0)
-        DO_SYSCALL(close, sigfile_fd);
+        DO_SYSCALL_ORIG(close, sigfile_fd);
     if (areas)
-        DO_SYSCALL(munmap, areas, areas_size);
+        DO_SYSCALL_ORIG(munmap, areas, areas_size);
     free(sig_path);
     return ret;
 }
@@ -933,7 +933,7 @@ static int load_enclave(struct pal_enclave* enclave, char* args, size_t args_siz
     struct pal_dns_host_conf dns_conf = {0};
     bool extra_runtime_domain_names_conf;
     uint64_t start_time;
-    DO_SYSCALL(gettimeofday, &tv, NULL);
+    DO_SYSCALL_ORIG(gettimeofday, &tv, NULL);
     start_time = tv.tv_sec * 1000000UL + tv.tv_usec;
 
     if (parent_stream_fd < 0) {
@@ -1025,7 +1025,7 @@ static int load_enclave(struct pal_enclave* enclave, char* args, size_t args_siz
             return ret;
     }
 
-    void* alt_stack = (void*)DO_SYSCALL(mmap, NULL, ALT_STACK_SIZE, PROT_READ | PROT_WRITE,
+    void* alt_stack = (void*)DO_SYSCALL_ORIG(mmap, NULL, ALT_STACK_SIZE, PROT_READ | PROT_WRITE,
                                         MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (IS_PTR_ERR(alt_stack))
         return -ENOMEM;
@@ -1039,7 +1039,7 @@ static int load_enclave(struct pal_enclave* enclave, char* args, size_t args_siz
         return ret;
 
     uint64_t end_time;
-    DO_SYSCALL(gettimeofday, &tv, NULL);
+    DO_SYSCALL_ORIG(gettimeofday, &tv, NULL);
     end_time = tv.tv_sec * 1000000UL + tv.tv_usec;
 
     if (g_sgx_enable_stats) {
@@ -1056,8 +1056,8 @@ static int load_enclave(struct pal_enclave* enclave, char* args, size_t args_siz
                         reserved_mem_ranges, reserved_mem_ranges_size);
 
     unmap_my_tcs();
-    DO_SYSCALL(munmap, alt_stack, ALT_STACK_SIZE);
-    DO_SYSCALL(exit, 0);
+    DO_SYSCALL_ORIG(munmap, alt_stack, ALT_STACK_SIZE);
+    DO_SYSCALL_ORIG(exit, 0);
     die_or_inf_loop();
 }
 
@@ -1069,7 +1069,7 @@ noreturn static void print_usage_and_exit(const char* argv_0) {
                self, self);
     log_always("This is an internal interface. Use gramine-sgx wrapper to launch applications in "
                "Gramine.");
-    DO_SYSCALL(exit_group, 1);
+    DO_SYSCALL_ORIG(exit_group, 1);
     die_or_inf_loop();
 }
 
@@ -1101,12 +1101,12 @@ __attribute_no_sanitize_address
 static void setup_asan(void) {
     int prot = PROT_READ | PROT_WRITE;
     int flags = MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED_NOREPLACE;
-    void* addr = (void*)DO_SYSCALL(mmap, (void*)ASAN_SHADOW_START, ASAN_SHADOW_LENGTH, prot, flags,
+    void* addr = (void*)DO_SYSCALL_ORIG(mmap, (void*)ASAN_SHADOW_START, ASAN_SHADOW_LENGTH, prot, flags,
                                    /*fd=*/-1, /*offset=*/0);
     if (IS_PTR_ERR(addr) || addr != (void*)ASAN_SHADOW_START) {
         int err = PTR_TO_ERR(addr);
         log_error("asan: error setting up shadow memory: %s", unix_strerror(err));
-        DO_SYSCALL(exit_group, unix_to_pal_error(err));
+        DO_SYSCALL_ORIG(exit_group, unix_to_pal_error(err));
         die_or_inf_loop();
     }
 }
@@ -1163,7 +1163,7 @@ int main(int argc, char* argv[], char* envp[]) {
     if (argc < 4)
         print_usage_and_exit(argv[0]);
 
-    g_host_pid = DO_SYSCALL(getpid);
+    g_host_pid = DO_SYSCALL_ORIG(getpid);
 
     g_pal_loader_path = get_main_exec_path();
     if (!g_pal_loader_path) {
@@ -1210,7 +1210,7 @@ int main(int argc, char* argv[], char* envp[]) {
 
         /* We'll receive our argv and config via IPC. */
         parent_stream_fd = atoi(argv[3]);
-        ret = DO_SYSCALL(fcntl, parent_stream_fd, F_SETFD, FD_CLOEXEC);
+        ret = DO_SYSCALL_ORIG(fcntl, parent_stream_fd, F_SETFD, FD_CLOEXEC);
         if (ret < 0) {
             return ret;
         }

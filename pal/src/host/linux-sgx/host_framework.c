@@ -30,7 +30,7 @@ int open_sgx_driver(void) {
     };
     int ret;
     for (size_t i = 0; i < ARRAY_SIZE(paths_to_try); i++) {
-        ret = DO_SYSCALL(open, paths_to_try[i], O_RDWR | O_CLOEXEC, 0);
+        ret = DO_SYSCALL_ORIG(open, paths_to_try[i], O_RDWR | O_CLOEXEC, 0);
         if (ret == -EACCES) {
             log_error("Cannot open %s (permission denied). This may happen because the current "
                       "user has insufficient permissions to this device.", paths_to_try[i]);
@@ -49,7 +49,7 @@ int open_sgx_driver(void) {
 int read_enclave_token(int token_file, sgx_arch_token_t* out_token) {
     struct stat stat;
     int ret;
-    ret = DO_SYSCALL(fstat, token_file, &stat);
+    ret = DO_SYSCALL_ORIG(fstat, token_file, &stat);
     if (ret < 0)
         return ret;
 
@@ -58,7 +58,7 @@ int read_enclave_token(int token_file, sgx_arch_token_t* out_token) {
         return -EINVAL;
     }
 
-    int bytes = DO_SYSCALL(read, token_file, out_token, sizeof(sgx_arch_token_t));
+    int bytes = DO_SYSCALL_ORIG(read, token_file, out_token, sizeof(sgx_arch_token_t));
     if (bytes < 0) {
         return bytes;
     } else if (bytes != sizeof(sgx_arch_token_t)) {
@@ -132,7 +132,7 @@ int create_dummy_enclave_token(sgx_sigstruct_t* sig, sgx_arch_token_t* out_token
 int read_enclave_sigstruct(int sigfile, sgx_sigstruct_t* sig) {
     struct stat stat;
     int ret;
-    ret = DO_SYSCALL(fstat, sigfile, &stat);
+    ret = DO_SYSCALL_ORIG(fstat, sigfile, &stat);
     if (ret < 0)
         return ret;
 
@@ -188,7 +188,7 @@ int create_enclave(sgx_arch_secs_t* secs, sgx_arch_token_t* token) {
     }
 #endif
 
-    uint64_t addr = DO_SYSCALL(mmap, request_mmap_addr, request_mmap_size,
+    uint64_t addr = DO_SYSCALL_ORIG(mmap, request_mmap_addr, request_mmap_size,
                                PROT_READ | PROT_WRITE | PROT_EXEC, MAP_FIXED_NOREPLACE | MAP_SHARED,
                                g_isgx_device, 0);
     if (IS_PTR_ERR(addr)) {
@@ -206,7 +206,7 @@ int create_enclave(sgx_arch_secs_t* secs, sgx_arch_token_t* token) {
     struct sgx_enclave_create param = {
         .src = (uint64_t)secs,
     };
-    int ret = DO_SYSCALL(ioctl, g_isgx_device, SGX_IOC_ENCLAVE_CREATE, &param);
+    int ret = DO_SYSCALL_ORIG(ioctl, g_isgx_device, SGX_IOC_ENCLAVE_CREATE, &param);
 
     if (ret < 0) {
         if (ret == -EIO) {
@@ -248,7 +248,7 @@ int create_enclave(sgx_arch_secs_t* secs, sgx_arch_token_t* token) {
      * syscall so an attempt to call it may return EINVAL, EOPNOTSUPP or ENOSYS. In this case,
      * we simply ignore the result of this syscall. */
     if (secs->attributes.xfrm & (1 << AMX_TILEDATA)) {
-        ret = DO_SYSCALL(arch_prctl, ARCH_REQ_XCOMP_PERM, AMX_TILEDATA);
+        ret = DO_SYSCALL_ORIG(arch_prctl, ARCH_REQ_XCOMP_PERM, AMX_TILEDATA);
         if (ret < 0 && ret != -EINVAL && ret != -EOPNOTSUPP && ret != -ENOSYS) {
             log_error("Requesting AMX permission failed: %s", unix_strerror(ret));
             return ret;
@@ -266,7 +266,7 @@ int add_pages_to_enclave(sgx_arch_secs_t* secs, void* addr, void* user_addr, uns
 
     if (!g_zero_pages) {
         /* initialize with just one page */
-        g_zero_pages = (void*)DO_SYSCALL(mmap, NULL, g_page_size, PROT_READ,
+        g_zero_pages = (void*)DO_SYSCALL_ORIG(mmap, NULL, g_page_size, PROT_READ,
                                          MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
         if (IS_PTR_ERR(g_zero_pages)) {
             ret = PTR_TO_ERR(g_zero_pages);
@@ -321,7 +321,7 @@ int add_pages_to_enclave(sgx_arch_secs_t* secs, void* addr, void* user_addr, uns
 
     uint64_t added_size = 0;
     while (added_size < size) {
-        ret = DO_SYSCALL(ioctl, g_isgx_device, SGX_IOC_ENCLAVE_ADD_PAGE, &param);
+        ret = DO_SYSCALL_ORIG(ioctl, g_isgx_device, SGX_IOC_ENCLAVE_ADD_PAGE, &param);
         if (ret < 0) {
             if (ret == -EINTR)
                 continue;
@@ -336,7 +336,7 @@ int add_pages_to_enclave(sgx_arch_secs_t* secs, void* addr, void* user_addr, uns
     }
 
     /* need to change permissions for EADDed pages since the initial mmap was with PROT_NONE */
-    ret = DO_SYSCALL(mprotect, addr, size, prot);
+    ret = DO_SYSCALL_ORIG(mprotect, addr, size, prot);
     if (ret < 0) {
         log_error("Changing protections of EADDed pages failed: %s", unix_strerror(ret));
         return ret;
@@ -345,13 +345,13 @@ int add_pages_to_enclave(sgx_arch_secs_t* secs, void* addr, void* user_addr, uns
     if (!user_addr && g_zero_pages_size < size) {
         /* not enough contigious zero pages to back up enclave pages, allocate more */
         /* TODO: this logic can be removed if we introduce a size cap in ENCLAVE_ADD_PAGES ioctl */
-        ret = DO_SYSCALL(munmap, g_zero_pages, g_zero_pages_size);
+        ret = DO_SYSCALL_ORIG(munmap, g_zero_pages, g_zero_pages_size);
         if (ret < 0) {
             log_error("Cannot unmap zero pages: %s", unix_strerror(ret));
             return ret;
         }
 
-        g_zero_pages = (void*)DO_SYSCALL(mmap, NULL, size, PROT_READ, MAP_PRIVATE | MAP_ANONYMOUS,
+        g_zero_pages = (void*)DO_SYSCALL_ORIG(mmap, NULL, size, PROT_READ, MAP_PRIVATE | MAP_ANONYMOUS,
                                          -1, 0);
         if (IS_PTR_ERR(g_zero_pages)) {
             ret = PTR_TO_ERR(g_zero_pages);
@@ -382,7 +382,7 @@ int add_pages_to_enclave(sgx_arch_secs_t* secs, void* addr, void* user_addr, uns
      * contrived logic won't be needed when the SGX driver stabilizes its ioctl interface.
      * (https://git.kernel.org/pub/scm/linux/kernel/git/jarkko/linux-sgx.git/tag/?h=v39) */
     while (param.length > 0) {
-        ret = DO_SYSCALL(ioctl, g_isgx_device, SGX_IOC_ENCLAVE_ADD_PAGES, &param);
+        ret = DO_SYSCALL_ORIG(ioctl, g_isgx_device, SGX_IOC_ENCLAVE_ADD_PAGES, &param);
         if (ret < 0) {
             if (ret == -EINTR)
                 continue;
@@ -406,7 +406,7 @@ int add_pages_to_enclave(sgx_arch_secs_t* secs, void* addr, void* user_addr, uns
     /* ask Intel SGX driver to actually mmap the added enclave pages; we can't use
      * MAP_FIXED_NOREPLACE here because we are overwriting a subset of enclave memory already
      * allocated in create_enclave(), see mmap request there */
-    uint64_t mapped = DO_SYSCALL(mmap, addr, size, prot, MAP_FIXED | MAP_SHARED, g_isgx_device, 0);
+    uint64_t mapped = DO_SYSCALL_ORIG(mmap, addr, size, prot, MAP_FIXED | MAP_SHARED, g_isgx_device, 0);
     if (IS_PTR_ERR(mapped)) {
         ret = PTR_TO_ERR(mapped);
         log_error("Cannot map enclave pages: %s", unix_strerror(ret));
@@ -427,7 +427,7 @@ int edmm_restrict_pages_perm(uint64_t addr, size_t count, uint64_t prot) {
             .length = (count - i) * PAGE_SIZE,
             .permissions = prot,
         };
-        int ret = DO_SYSCALL(ioctl, g_isgx_device, SGX_IOC_ENCLAVE_RESTRICT_PERMISSIONS, &params);
+        int ret = DO_SYSCALL_ORIG(ioctl, g_isgx_device, SGX_IOC_ENCLAVE_RESTRICT_PERMISSIONS, &params);
         assert(params.count % PAGE_SIZE == 0);
         i += params.count / PAGE_SIZE;
         if (ret < 0) {
@@ -454,7 +454,7 @@ int edmm_modify_pages_type(uint64_t addr, size_t count, uint64_t type) {
             .length = (count - i) * PAGE_SIZE,
             .page_type = type,
         };
-        ret = DO_SYSCALL(ioctl, g_isgx_device, SGX_IOC_ENCLAVE_MODIFY_TYPES, &params);
+        ret = DO_SYSCALL_ORIG(ioctl, g_isgx_device, SGX_IOC_ENCLAVE_MODIFY_TYPES, &params);
         assert(params.count % PAGE_SIZE == 0);
         i += params.count / PAGE_SIZE;
         if (ret < 0) {
@@ -487,7 +487,7 @@ int edmm_modify_pages_type(uint64_t addr, size_t count, uint64_t type) {
          * page which makes EENTER on that TCS page fail with unrecoverable #PF, and creating a VMA
          * with RWX permissions is explicitly prohibited by the SGX driver.
          */
-        ret = DO_SYSCALL(mprotect, addr, count * PAGE_SIZE, PROT_READ | PROT_WRITE);
+        ret = DO_SYSCALL_ORIG(mprotect, addr, count * PAGE_SIZE, PROT_READ | PROT_WRITE);
         if (ret < 0) {
             log_error("Changing protections of TCS pages failed: %s", unix_strerror(ret));
             return ret;
@@ -506,7 +506,7 @@ int edmm_remove_pages(uint64_t addr, size_t count) {
             .offset = addr + i * PAGE_SIZE - g_pal_enclave.baseaddr,
             .length = (count - i) * PAGE_SIZE,
         };
-        int ret = DO_SYSCALL(ioctl, g_isgx_device, SGX_IOC_ENCLAVE_REMOVE_PAGES, &params);
+        int ret = DO_SYSCALL_ORIG(ioctl, g_isgx_device, SGX_IOC_ENCLAVE_REMOVE_PAGES, &params);
         assert(params.count % PAGE_SIZE == 0);
         i += params.count / PAGE_SIZE;
         if (ret < 0) {
@@ -523,7 +523,7 @@ int edmm_remove_pages(uint64_t addr, size_t count) {
 /* must be called after open_sgx_driver() */
 int edmm_supported_by_driver(bool* out_supported) {
     struct sgx_enclave_remove_pages params = { .offset = 0, .length = 0 }; /* dummy */
-    int ret = DO_SYSCALL(ioctl, g_isgx_device, SGX_IOC_ENCLAVE_REMOVE_PAGES, &params);
+    int ret = DO_SYSCALL_ORIG(ioctl, g_isgx_device, SGX_IOC_ENCLAVE_REMOVE_PAGES, &params);
     if (ret != -EINVAL && ret != -ENOTTY) {
         /* we expect either -EINVAL (REMOVE_PAGES ioctl exists but fails due to params.length == 0)
          * or -ENOTTY (REMOVE_PAGES ioctl doesn't exist) */
@@ -557,10 +557,10 @@ int init_enclave(sgx_arch_secs_t* secs, sgx_sigstruct_t* sigstruct, sgx_arch_tok
         .einittoken = (uint64_t)token,
 #endif
     };
-    int ret = DO_SYSCALL(ioctl, g_isgx_device, SGX_IOC_ENCLAVE_INIT, &param);
+    int ret = DO_SYSCALL_ORIG(ioctl, g_isgx_device, SGX_IOC_ENCLAVE_INIT, &param);
     if (ret < 0) {
         log_error("Enclave initialization IOCTL failed: %s", unix_strerror(ret));
-        return ret;
+        //return ret;
     }
 
     if (ret) {
@@ -593,7 +593,7 @@ int init_enclave(sgx_arch_secs_t* secs, sgx_sigstruct_t* sigstruct, sgx_arch_tok
     }
 
     /* all enclave pages were EADDed, don't need zero pages anymore */
-    ret = DO_SYSCALL(munmap, g_zero_pages, g_zero_pages_size);
+    ret = DO_SYSCALL_ORIG(munmap, g_zero_pages, g_zero_pages_size);
     if (ret < 0) {
         log_error("Cannot unmap zero pages: %s", unix_strerror(ret));
         return ret;
