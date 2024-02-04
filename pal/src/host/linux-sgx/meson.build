@@ -86,7 +86,6 @@ libpal_sgx = shared_library('pal',
     'pal_sockets.c',
     'pal_streams.c',
     'pal_threading.c',
-    #'host_syscall_wrappers.c',
     '../linux-common/arch/x86_64/base64.c',
     '../linux-common/arch/x86_64/syscall.c',
     '../linux-common/arch/x86_64/syscall.S',
@@ -102,6 +101,7 @@ libpal_sgx = shared_library('pal',
         cflags_sanitizers,
         cflags_custom_stack_protector,
         '-DIN_ENCLAVE',
+        '-DFUZZER=1',
     ],
 
     link_args: [
@@ -138,8 +138,86 @@ libpal_sgx = shared_library('pal',
     install_dir: pkglibdir / 'sgx',
 )
 
+# libpal_sgx_fuzz = shared_library('pal',
+#     'common_manifest_sgx_parser.c',
+#     'enclave_api.S',
+#     'enclave_ecalls.c',
+#     'enclave_edmm.c',
+#     'enclave_entry.S',
+#     'enclave_framework.c',
+#     'enclave_ocalls.c',
+#     'enclave_platform.c',
+#     'enclave_xstate.c',
+#     'pal_console.c',
+#     'pal_devices.c',
+#     'pal_eventfd.c',
+#     'pal_events.c',
+#     'pal_exception.c',
+#     'pal_files.c',
+#     'pal_main.c',
+#     'pal_memory.c',
+#     'pal_misc.c',
+#     'pal_object.c',
+#     'pal_pipes.c',
+#     'pal_process.c',
+#     'pal_rtld.c',
+#     'pal_sockets.c',
+#     'pal_streams.c',
+#     'pal_threading.c',
+#     '../linux-common/arch/x86_64/base64.c',
+#     '../linux-common/arch/x86_64/syscall.c',
+#     '../linux-common/arch/x86_64/syscall.S',
+#     pal_sgx_asm_offsets_h,
+#     pal_common_sources,
+#     pal_linux_common_sources_enclave,
+#     host_sgx_driver_h,
+
+#     include_directories: sgx_inc,
+
+#     c_args: [
+#         cflags_pal_sgx,
+#         cflags_sanitizers,
+#         cflags_custom_stack_protector,
+#         '-DIN_ENCLAVE',
+#         '-DFUZZER=1',
+#     ],
+
+#     link_args: [
+#         '-nostdlib',
+
+#         # For PAL symbol resolution, we use old-style hash (DT_HASH) table instead of the default
+#         # GNU hash (DT_GNU_HASH) table -- to figure out the number of dynamic symbols in the SYMTAB
+#         # symbol table
+#         '-Wl,--hash-style=sysv',
+
+#         # PAL is expected to be linked with RELRO (Relocation Read-Only)
+#         '-Wl,-zrelro',
+#         '-Wl,-znow',
+
+#         '-Wl,-zcombreloc',
+#         '-Wl,-zdefs',
+#         '-Wl,--version-script=@0@'.format(pal_sgx_map.full_path()),
+#         '-Wl,-T@0@'.format(pal_sgx_lds),
+#         '-Wl,--eh-frame-hdr',
+#     ],
+
+#     link_depends: [
+#         pal_sgx_map,
+#         pal_sgx_lds,
+#     ],
+
+#     dependencies: [
+#         common_dep,
+#         cryptoadapter_dep,
+#         ioctls_dep,
+#     ],
+
+#     install: true,
+#     install_dir: pkglibdir / 'sgx',
+# )
+
 # host (untrusted runtime)
-libpal_sgx_host = executable('loader',
+libpal_sgx_host_fuzz = executable('loader_fuzz',
     'common_manifest_sgx_parser.c',
     'host_ecalls.c',
     'host_entry.S',
@@ -156,8 +234,55 @@ libpal_sgx_host = executable('loader',
     'host_thread.c',
     'host_syscall_wrappers.c',
     pal_linux_common_sources_host,
-    #'../linux-common/arch/x86_64/syscall.c',
-    #'../linux-common/arch/x86_64/base64.c',
+    pal_sgx_asm_offsets_h,
+    aesm_proto_ch,
+    host_sgx_driver_h,
+
+    include_directories: sgx_inc,
+    c_args: [
+        cflags_pal_sgx,
+        cflags_sanitizers,
+
+        # host part of PAL uses stack protector with standard parameters (not the ones defined for
+        # PAL/LibOS)
+        '-fstack-protector-strong',
+        '-DFUZZER=1',
+    ],
+    link_args: [
+        '-Wl,-zrelro',
+        '-Wl,-znow',
+    ],
+    pie: true,
+
+    dependencies: [
+        common_dep,
+        protobuf_dep,
+        vtune_dep,
+        dl_dep,
+    ],
+
+    install: true,
+    install_dir: pkglibdir / 'sgx',
+)
+
+
+# host (untrusted runtime)
+libpal_sgx_host = executable('loader',
+    'common_manifest_sgx_parser.c',
+    'host_ecalls.c',
+    'host_entry.S',
+    'host_exception.c',
+    'host_framework.c',
+    'host_log.c',
+    'host_main.c',
+    'host_ocalls.c',
+    'host_perf_data.c',
+    'host_platform.c',
+    'host_process.c',
+    'host_profile.c',
+    'host_syscall.c',
+    'host_thread.c',
+    pal_linux_common_sources_host,
     pal_sgx_asm_offsets_h,
     aesm_proto_ch,
     host_sgx_driver_h,
@@ -209,6 +334,16 @@ if debug
         command: gen_symbol_map_cmd,
         capture: true,
         output: 'loader.map',
+
+        install: true,
+        install_dir: pkglibdir / 'sgx',
+    )
+
+    custom_target('loader_fuzz.map',
+        input: libpal_sgx_host_fuzz,
+        command: gen_symbol_map_cmd,
+        capture: true,
+        output: 'loader_fuzz.map',
 
         install: true,
         install_dir: pkglibdir / 'sgx',

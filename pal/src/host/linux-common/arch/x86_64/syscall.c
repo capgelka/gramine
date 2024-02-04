@@ -20,10 +20,15 @@
 #define BUFF_SIZE 8192
 #define REGISTER_SIZE 8
 #define DESCRIPTORS_TO_RESERVE 50
-#define SYSCALL_TO_SWITCH SYS_write
-#define ARG_TO_SWITCH "message1234"
+#define SYSCALL_TO_SWITCH SYS_mkdir
+#define ARG_TO_SWITCH "/message1234"
 
+#ifdef FUZZER
+int g_start_interception = 1;
+#else
 int g_start_interception = 0;
+#endif
+
 
 static int init_socket(struct sockaddr_un* cl_addr, struct sockaddr_un* sv_addr)
 {
@@ -103,11 +108,9 @@ inline long do_syscall_wrapped(long nr, int num_args, ...)
           goto internal_syscall;
        }
    }
-
     if (g_start_interception && !on_syscall) {
 
         if (nr == SYS_exit) {
-            g_start_interception = 0;
             goto internal_syscall;
         }
 
@@ -131,9 +134,9 @@ inline long do_syscall_wrapped(long nr, int num_args, ...)
         if (!enable_hooks && (nr == SYSCALL_TO_SWITCH)) {
             va_list ap_copy;
             va_copy(ap_copy, ap);
-            int fd = va_arg(ap_copy, int);
+            // int fd = va_arg(ap_copy, int);
             char* msg = va_arg(ap_copy, char*);
-            if (fd == 1 && strstr(msg, ARG_TO_SWITCH)) {
+            if (strstr(msg, ARG_TO_SWITCH)) {
                 enable_hooks = 1;
                 not_handle = 0;
                 on_syscall = 0;

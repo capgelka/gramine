@@ -19,7 +19,7 @@
 #define FUZZ 1
 
 #ifdef FUZZ
-#define FUZZER "FUZZER"
+#define FUZZER_ "FUZZER"
     extern int g_start_interception;
 #endif
 
@@ -384,6 +384,7 @@ noreturn void pal_main(uint64_t instance_id,       /* current instance id */
             INIT_FAIL("Could not generate random instance_id");
         }
     }
+    log_always("YES, THE SAME MAIN!");
     g_pal_public_state.instance_id = instance_id;
     g_pal_common_state.parent_process = parent_process;
 
@@ -597,14 +598,14 @@ noreturn void pal_main(uint64_t instance_id,       /* current instance id */
 #ifdef FUZZ
     {
         log_always("INIT DONE");
-        size_t len = strlen(FUZZER);
+        size_t len = strlen(FUZZER_);
         int* offset = NULL;
         char* c;
         char** p;
         for (p = (char**)final_environments; (c = *p) != NULL; ++p) {
             // log_always("%s", c);
             // log_always("-------");
-            if (strncmp(c, FUZZER, len) == 0 && c[len] == '=') {
+            if (strncmp(c, FUZZER_, len) == 0 && c[len] == '=') {
                 // *offset = p - (char**)final_environments;
                g_start_interception = 1;
                break;
@@ -612,7 +613,7 @@ noreturn void pal_main(uint64_t instance_id,       /* current instance id */
         }
     }
 #endif
-
+    log_always("g_start_interception: %d", g_start_interception);
     /* Now we will start the execution */
     start_execution(arguments, final_environments);
 

@@ -54,6 +54,25 @@ if sgx
         install: true,
         install_dir: get_option('bindir'),
     )
+
+
+    custom_target('gramine-sgx-fuzz',
+        command: [meson_render_script_prog,
+            '--mode', '755',
+            common_render_defines,
+            '-D', 'SGX=1',
+            '-D', 'HOST_PAL_PATH=@0@'.format(hostpalpath_linux_sgx),
+            '-D', 'LIBPAL_PATH=@0@'.format(hostpalpath_linux_sgx / 'libpal.so'),
+            '-D', 'PAL_CMD=@0@'.format(get_option('prefix') / pkglibdir / 'sgx' / 'loader_fuzz'),
+            '-D', 'CONFIG_SGX_DRIVER=@0@'.format(sgx_driver),
+            '@INPUT@',
+            '@OUTPUT@',
+        ],
+        input: 'gramine.in',
+        output: 'gramine-sgx-fuzz',
+        install: true,
+        install_dir: get_option('bindir'),
+    )
 endif
 
 executable('gramine-argv-serializer',

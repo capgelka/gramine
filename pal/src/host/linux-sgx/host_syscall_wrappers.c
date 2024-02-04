@@ -1,20 +1,26 @@
 #include <stdarg.h>
 #include "syscall.h"
 #include "host_syscall.h"
+
 #include "log.h"
 
 #define socket socket_orig
 #include <sys/socket.h>
 #undef socket
 
+
 #include "api.h"
 #include "base64.h"
 #include <sys/un.h>
 #include <sys/types.h>
 #include <sys/syscall.h>
+#include <linux/futex.h>
 #include <sys/stat.h>
+#include <sys/mman.h>
 #include <unistd.h>
 #include <fcntl.h>
+
+
 
 #define CLIENT_SOCK "/tmp/fuzz_client_sock"
 #define SERVER_SOCK "/tmp/fuzz_server_sock"
@@ -24,7 +30,51 @@
 #define SYSCALL_TO_SWITCH SYS_write
 #define ARG_TO_SWITCH "message1234"
 
-extern int g_start_interception;
+
+#define SHARED_MEM_NAME "/shm_interface"
+#define FILE_TO_SAVE_ADDRESS "shared_memory_address.txt"
+#define MAP_ANONYMOUS        0x20   
+
+#define SHARED_MEM_SIZE 8192
+
+int g_shm_fd;
+char* g_shared_memory = NULL;
+
+static void init_shm() {
+    g_shm_fd = DO_SYSCALL(memfd_create, SHARED_MEM_NAME, 0);
+    g_shared_memory = (char*) DO_SYSCALL(
+        mmap, NULL, SHARED_MEM_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, g_shm_fd, 0
+    );
+}
+
+
+static void send_msg(char* msg, size_t size) {
+    int *spinlock = (int *)g_shared_memory;
+    char *shared_memory = g_shared_memory + sizeof(int);
+    *spinlock = 0;
+
+    while (__sync_lock_test_and_set(spinlock, 1) != 0)
+           ; // Spinlock
+
+    ((int*)&shared_memory)[0] = size;
+    memcpy(msg, shared_memory + sizeof(int), size);
+    *spinlock = 0;
+}
+
+static void recieve_msg(char* buff) {
+    int *spinlock = (int *)g_shared_memory;
+    char *shared_memory = g_shared_memory + sizeof(int);
+    *spinlock = 0;
+
+    while (__sync_lock_test_and_set(spinlock, 1) != 0)
+           ; // Spinlock
+
+    size_t size = *((int*)shared_memory);
+    memcpy(shared_memory + sizeof(int), buff, size);
+    *spinlock = 0;
+}
+
+
 
 static int init_socket_int(struct sockaddr_un* cl_addr, struct sockaddr_un* sv_addr)
 {
@@ -73,19 +123,18 @@ static void show_stats(const struct stat* stats)
     log_always("Last status change: %ld\n", stats->st_ctime);
 }
 
-
 __attribute_no_stack_protector
 long do_syscall_intr_wrapped(long nr, ...)
 {
-    static int sock_fd = 0;
-    static struct sockaddr_un cl_addr = { .sun_family = AF_UNIX };
-    static struct sockaddr_un sv_addr = { .sun_family = AF_UNIX };
-    static int on_syscall = 0;
-    static int not_handle = 0;
-    static int enable_hooks = 0;
-    static int use_urandom = 0;
-    static char buff[BUFF_SIZE] = {0};
-    static int dst[DESCRIPTORS_TO_RESERVE] = {0};
+    static _Thread_local int sock_fd = 0;
+    static _Thread_local struct sockaddr_un cl_addr = { .sun_family = AF_UNIX };
+    static _Thread_local struct sockaddr_un sv_addr = { .sun_family = AF_UNIX };
+    static _Thread_local int on_syscall = 0;
+    static _Thread_local int not_handle = 0;
+    static _Thread_local int enable_hooks = 0;
+    static _Thread_local int use_urandom = 0;
+    static _Thread_local char buff[BUFF_SIZE] = {0};
+    static _Thread_local int dst[DESCRIPTORS_TO_RESERVE] = {0};
 
     va_list ap;
     va_start(ap, nr);
@@ -121,19 +170,15 @@ long do_syscall_intr_wrapped(long nr, ...)
        }
    }
 
-    if (g_start_interception && !on_syscall) {
+    if (!on_syscall) {
 
         if (nr == SYS_exit) {
-            g_start_interception = 0;
             goto internal_syscall;
         }
 
         if (nr == SYS_open) {
-            va_list ap_copy;
-            va_copy(ap_copy, ap);
 
-            char* path = va_arg(ap_copy, char*);
-            va_end(ap_copy);
+            char* path = (char*) arg1;
 
             if (!strcmp(path, "/dev/urandom")) {
                log_always("Use Urandom!");
@@ -146,27 +191,19 @@ long do_syscall_intr_wrapped(long nr, ...)
         }
 
         if (!enable_hooks && (nr == SYSCALL_TO_SWITCH)) {
-            va_list ap_copy;
-            va_copy(ap_copy, ap);
-            int fd = va_arg(ap_copy, int);
-            char* msg = va_arg(ap_copy, char*);
+            int fd = arg1;
+            char* msg = (char*) arg2;
             if (fd == 1 && strstr(msg, ARG_TO_SWITCH)) {
                 enable_hooks = 1;
                 not_handle = 0;
                 on_syscall = 0;
                 log_always("Hooking enabled on syscall %ld\n\n\n", nr);
-                va_end(ap_copy);
                 return 0;
             }
-            va_end(ap_copy);
         }
 
         if (nr == SYS_write) {
-            va_list ap_copy;
-            va_copy(ap_copy, ap);
-
-            long fd = va_arg(ap_copy, long);
-            va_end(ap_copy);
+            long fd = arg1;
 
             if (fd == 1 || fd == 2) {
                 goto internal_syscall;
@@ -177,11 +214,8 @@ long do_syscall_intr_wrapped(long nr, ...)
             nr == SYS_lstat || 
             nr == SYS_ftruncate ||
             nr == SYS_close) {
-            va_list ap_copy;
-            va_copy(ap_copy, ap);
 
-            long fd = va_arg(ap_copy, long);
-            va_end(ap_copy);
+            long fd = arg1;
 
             if (fd == 0 || fd == 1 || fd == 2) {
                 goto internal_syscall;
@@ -214,6 +248,7 @@ long do_syscall_intr_wrapped(long nr, ...)
 
             on_syscall = 1;
             sock_fd = init_socket_int(&cl_addr, &sv_addr);
+            init_shm();
             log_debug("Received sock_fd value: %d", sock_fd);
             on_syscall = 0;
             
@@ -238,13 +273,13 @@ long do_syscall_intr_wrapped(long nr, ...)
         {
             case SYS_read:
             {
-                long fd = va_arg(ap_fuzz, long);
+                long fd = arg1;
                 if (fd == 3 && use_urandom) {
                     log_always("skipping hook for urandom read");
                     goto passthrough_syscall;
                 }
-                buf = va_arg(ap_fuzz, char*);
-                size_t count = va_arg(ap_fuzz, size_t);
+                buf = (char*) arg2;
+                size_t count = (size_t) arg3;
                 snprintf(buff, BUFF_SIZE, "read,%ld,buff,%ld",
                          fd, count);
                 break;
@@ -261,9 +296,9 @@ long do_syscall_intr_wrapped(long nr, ...)
             }
             case SYS_open:
             {
-                const char* filename = va_arg(ap_fuzz, const char*);
-                int flags = va_arg(ap_fuzz, long);
-                mode_t mode = va_arg(ap_fuzz, long);
+                const char* filename = (const char*) arg1;
+                int flags = (int) arg2;
+                mode_t mode = (mode_t) arg3;
                 snprintf(buff, BUFF_SIZE, "open,%s,%d,%d",
                          filename, flags, mode);
                 break;
@@ -281,74 +316,74 @@ long do_syscall_intr_wrapped(long nr, ...)
             }
             case SYS_close:
             {
-                long fd = va_arg(ap_fuzz, long);
+                long fd = arg1;
                 snprintf(buff, BUFF_SIZE, "close,%ld", fd);
                 break;
             }    
             case SYS_rmdir:
             {
-                const char* filename = va_arg(ap_fuzz, const char*);
+                const char* filename = (const char*) arg1;
                 snprintf(buff, BUFF_SIZE, "rmdir,%s", filename);
                 break;
             }
             case SYS_unlink:
             {
-                const char* filename = va_arg(ap_fuzz, const char*);
+                const char* filename = (const char*) arg1;
                 snprintf(buff, BUFF_SIZE, "unlink,%s", filename);
                 break;
             }
             case SYS_chdir:
             {
-                const char* filename = va_arg(ap_fuzz, const char*);
+                const char* filename = (const char*) arg1;
                 snprintf(buff, BUFF_SIZE, "chdir,%s", filename);
                 break;
             }
             case SYS_mkdir:
             {
-                const char* filename = va_arg(ap_fuzz, const char*);
-                mode_t mode = va_arg(ap_fuzz, mode_t);
+                const char* filename = (const char*) arg1;
+                mode_t mode = (mode_t) arg2;
                 snprintf(buff, BUFF_SIZE, "mkdir,%s,%d", filename, mode);
                 break;
             }
             case SYS_rename:
             {
-                const char* filename = va_arg(ap_fuzz, const char*);
-                const char* filename_new = va_arg(ap_fuzz, const char*);
+                const char* filename = (const char*) arg1;
+                const char* filename_new = (const char*) arg2;
                 snprintf(buff, BUFF_SIZE, "rename,%s,%s", filename, filename_new);
                 break;
             }      
             case SYS_access:
             {
-                const char* filename = va_arg(ap_fuzz, const char*);
-                mode_t mode = va_arg(ap_fuzz, mode_t);
+                const char* filename = (const char*) arg1;
+                mode_t mode = (mode_t) arg2;
                 snprintf(buff, BUFF_SIZE, "access,%s,%d", filename, mode);
                 break;
             }
             case SYS_lseek:
             {
-                long fd = va_arg(ap_fuzz, long);
-                off_t offset = va_arg(ap_fuzz, off_t);
-                int whence = va_arg(ap_fuzz, int);
+                long fd = arg1;
+                off_t offset = (off_t) arg2;
+                int whence = (int) arg3;
                 snprintf(buff, BUFF_SIZE, "lseek,%ld,%lld,%d",
                          fd, (long long)offset, whence);
                 break;
             }
             case SYS_pread64:
             {
-                long fd = va_arg(ap_fuzz, long);
-                buf = va_arg(ap_fuzz, char*);
-                size_t count = va_arg(ap_fuzz, size_t);
-                off_t offset = va_arg(ap_fuzz, off_t);
+                long fd = arg1;
+                buf = (char*) arg2;
+                size_t count = (size_t) arg3;
+                off_t offset = (off_t) arg4;
                 snprintf(buff, BUFF_SIZE, "pread,%ld,buff,%ld,%lld",
                          fd, count, (long long)offset);
                 break;
             }
             case SYS_pwrite64:
             {
-                long fd = va_arg(ap_fuzz, long);
-                buf = (char*) va_arg(ap_fuzz, const char*);
-                size_t count = va_arg(ap_fuzz, size_t);
-                off_t offset = va_arg(ap_fuzz, off_t);
+                long fd = arg1;
+                buf = (char*) arg2;
+                size_t count = (size_t) arg3;
+                off_t offset = (off_t) arg4;
                 snprintf(buff, BUFF_SIZE, "pwrite,%ld,buff,%ld,%lld,",
                          fd, count, (long long)offset);
                 need_encode = count;
@@ -356,8 +391,8 @@ long do_syscall_intr_wrapped(long nr, ...)
             }
             case SYS_fstat:
             {
-                long fd = va_arg(ap_fuzz, long);
-                buf = (char*) va_arg(ap_fuzz, const struct stat*);
+                long fd = arg1;
+                buf = (char*) arg2;
                 snprintf(buff, BUFF_SIZE, "fstat,%ld,buff", fd);
                 break;
             }
@@ -366,29 +401,29 @@ long do_syscall_intr_wrapped(long nr, ...)
             case SYS_stat:
             case SYS_lstat:
             {
-                const char* filename = va_arg(ap_fuzz, const char*);
-                buf = (char*) va_arg(ap_fuzz, const struct stat*);
+                const char* filename = (const char*) arg1;
+                buf = (char*) arg2;
                 snprintf(buff, BUFF_SIZE, "lstat,%s,buff", filename);
                 break;
             }
             case SYS_ftruncate:
             {
-                long fd = va_arg(ap_fuzz, long);
-                off_t size = va_arg(ap_fuzz, off_t);
+                long fd = arg1;
+                off_t size = (off_t) arg2;
                 snprintf(buff, BUFF_SIZE, "ftruncate,%ld,%ld", fd, size);
                 break;
             }
             case SYS_fchmod:
             {
-                long fd = va_arg(ap_fuzz, long);
-                mode_t mode = va_arg(ap_fuzz, mode_t);
+                long fd = arg1;
+                mode_t mode = (mode_t) arg2;
                 snprintf(buff, BUFF_SIZE, "fchmod,%ld,%u", fd, mode);
                 break;
             }
             case SYS_chmod:
             {
-                const char* filename = va_arg(ap_fuzz, const char*);
-                mode_t mode = va_arg(ap_fuzz, mode_t);
+                const char* filename = (const char*) arg1;
+                mode_t mode = (mode_t) arg2;
                 snprintf(buff, BUFF_SIZE, "chmod,%s,%u", filename, mode);
                 break;
             }

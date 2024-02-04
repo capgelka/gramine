@@ -875,5 +875,6 @@ noreturn void pal_linux_main(void* uptr_libpal_uri, size_t libpal_uri_len, void*
     g_pal_linuxsgx_state.enclave_initialized = true;
 
     /* call main function */
+    log_always("MAIN MAIN MAIN");
     pal_main(instance_id, parent, first_thread, arguments, environments, post_callback);
 }
