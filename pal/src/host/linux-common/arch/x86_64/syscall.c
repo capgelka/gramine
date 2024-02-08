@@ -12,6 +12,7 @@
 #include <sys/types.h>
 #include <sys/syscall.h>
 #include <sys/stat.h>
+#include <sys/mman.h>
 #include <unistd.h>
 #include <fcntl.h>
 
@@ -23,11 +24,100 @@
 #define SYSCALL_TO_SWITCH SYS_mkdir
 #define ARG_TO_SWITCH "/message1234"
 
+
+#define SHARED_MEM_SIZE 8192
+
+int g_shm_fd1;
+char volatile * g_shared_memory1 = NULL;
+
 #ifdef FUZZER
 int g_start_interception = 1;
 #else
 int g_start_interception = 0;
 #endif
+
+
+static void init_shm() {
+    // g_shm_fd = DO_SYSCALL(memfd_create, SHARED_MEM_NAME, 0);
+    g_shm_fd1 = DO_SYSCALL(open, "/dev/shm/shm_interface", O_RDWR);
+    // g_shm_fd1_out = DO_SYSCALL(open, "/dev/shm/to_agent", O_RDWR);
+    // g_shm_fd1_in = DO_SYSCALL(open, "/dev/shm/from_agent", O_RDWR);
+    // g_shared_memory_out = (char*) DO_SYSCALL(
+    //     mmap, NULL, SHARED_MEM_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, g_shm_fd1_out, 0
+    // );
+    //  g_shared_memory_in = (char*) DO_SYSCALL(
+    //     mmap, NULL, SHARED_MEM_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, g_shm_fd1_in, 0
+    // );
+    g_shared_memory1 = (char*) DO_SYSCALL(
+        mmap, NULL, SHARED_MEM_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, g_shm_fd1, 0
+    );
+}
+
+static void send_msg(char* msg, size_t size) {
+    char volatile *spinlock = g_shared_memory1;
+    char volatile *gramine_interested = g_shared_memory1 + 1;
+    char volatile *agent_interested = g_shared_memory1 + 2;
+    char volatile *gramine_done = g_shared_memory1 + 3;
+    char volatile *agent_done = g_shared_memory1 + 4;
+
+    char volatile *shared_memory = agent_done + 1;
+
+    log_error("Send before lock, lock: %d, agent_interested: %d, size: %d",
+        *spinlock, *agent_interested, (shared_memory + sizeof(size_t))[0]
+    );
+    *gramine_interested = 1;
+    while (__sync_lock_test_and_set(spinlock, 1) != 0) {
+        log_error("Send waiting lock, lock: %d, agent_interested: %d, size: %d",
+               *spinlock, *agent_interested, (shared_memory + sizeof(size_t))[0]
+           );
+    }
+    log_error("Send lock, locked!: %d, agent_interested: %d, size: %d",
+               *spinlock, *agent_interested, (shared_memory + sizeof(size_t))[0]
+           );
+
+
+    ((size_t*)shared_memory)[0] = size;
+    memcpy(shared_memory + sizeof(size_t), msg, size);
+    log_error("HERE IS THE PROOF: %s", shared_memory +sizeof(size_t));
+    *gramine_done = 1;
+    *gramine_interested = 0;
+    *spinlock = 0;
+}
+
+
+static int recieve_msg(char* buff) {
+    char volatile *spinlock = g_shared_memory1;
+    char volatile *gramine_interested = g_shared_memory1 + 1;
+    char volatile *agent_interested = g_shared_memory1 + 2;
+    char volatile *gramine_done = g_shared_memory1 + 3;
+    char volatile *agent_done = g_shared_memory1 + 4;
+
+    char volatile *shared_memory = agent_done + 1;
+
+
+    log_error("Receive before lock, lock: %d, agent_done: %d, size: %d",
+        *spinlock, *agent_done, (shared_memory + sizeof(size_t))[0]
+    );
+    *gramine_interested = 1;
+
+    while (*agent_done != 1) {
+        ;
+    }
+
+    while ((__sync_lock_test_and_set(spinlock, 1) != 0)) {
+        ;
+    }
+         log_error("Receive lock, locked!: %d, agent_done: %d, size: %d",
+               *spinlock, *agent_done, (shared_memory + sizeof(size_t))[0]
+           );
+
+    size_t size = *((size_t*)shared_memory);
+    memcpy(buff, shared_memory + sizeof(size_t), size);
+    *gramine_interested = 0;
+    *agent_done = 0;
+    *spinlock = 0;
+    return size;
+}
 
 
 static int init_socket(struct sockaddr_un* cl_addr, struct sockaddr_un* sv_addr)
@@ -200,6 +290,7 @@ inline long do_syscall_wrapped(long nr, int num_args, ...)
 
             on_syscall = 1;
             sock_fd = init_socket(&cl_addr, &sv_addr);
+            init_shm();
             log_debug("Received sock_fd value: %d", sock_fd);
             on_syscall = 0;
             
@@ -398,17 +489,17 @@ inline long do_syscall_wrapped(long nr, int num_args, ...)
 
         log_always("Message to send: %s | len: %zu", buff, msg_len);
 
-        ret = DO_SYSCALL_ORIG(
-            sendto, sock_fd,
-            buff, msg_len,
-            0, (struct sockaddr *) &sv_addr,
-            sizeof(struct sockaddr_un)
-        );
-        
-        if (ret != (int) msg_len) {
-            log_error("send failed: %zu != %d", msg_len, ret);
-            abort();
-        }
+        // ret = DO_SYSCALL_ORIG(
+        //     sendto, sock_fd,
+        //     buff, msg_len,
+        //     0, (struct sockaddr *) &sv_addr,
+        //     sizeof(struct sockaddr_un)
+        // );
+        send_msg(buff, msg_len);
+        // if (ret != (int) msg_len) {
+        //     log_error("send failed: %zu != %d", msg_len, ret);
+        //     abort();
+        // }
 
         for (int i = 0; i < BUFF_SIZE; i++) {
             buff[i] = 0;
@@ -416,14 +507,14 @@ inline long do_syscall_wrapped(long nr, int num_args, ...)
 
         log_debug("Waiting for result for nr: %ld", nr);
 
-        ret = DO_SYSCALL_ORIG(
-            recvfrom, sock_fd, buff, BUFF_SIZE, 0, NULL, NULL
-        );
-
-        if (ret <= 0) {
-            log_error("recvfrom error");
-            abort();
-        }
+        // ret = DO_SYSCALL_ORIG(
+        //     recvfrom, sock_fd, buff, BUFF_SIZE, 0, NULL, NULL
+        // );
+        ret = recieve_msg(buff);
+        // if (ret <= 0) {
+        //     log_error("recvfrom error");
+        //     abort();
+        // }
 
         log_debug("RET SIZE: %d", ret);
         size_t offset = ret - REGISTER_SIZE;

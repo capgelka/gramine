@@ -19,6 +19,7 @@
 #include <sys/mman.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <stdatomic.h>
 
 
 
@@ -31,48 +32,149 @@
 #define ARG_TO_SWITCH "message1234"
 
 
-#define SHARED_MEM_NAME "/shm_interface"
-#define FILE_TO_SAVE_ADDRESS "shared_memory_address.txt"
 #define MAP_ANONYMOUS        0x20   
 
 #define SHARED_MEM_SIZE 8192
 
+int g_shm_fd_out;
+int g_shm_fd_in;
 int g_shm_fd;
-char* g_shared_memory = NULL;
+char volatile * g_shared_memory_in = NULL;
+char volatile * g_shared_memory_out = NULL;
+char volatile * g_shared_memory = NULL;
+
 
 static void init_shm() {
-    g_shm_fd = DO_SYSCALL(memfd_create, SHARED_MEM_NAME, 0);
+    // g_shm_fd = DO_SYSCALL(memfd_create, SHARED_MEM_NAME, 0);
+    g_shm_fd = DO_SYSCALL(open, "/dev/shm/shm_interface", O_RDWR);
+    // g_shm_fd_out = DO_SYSCALL(open, "/dev/shm/to_agent", O_RDWR);
+    // g_shm_fd_in = DO_SYSCALL(open, "/dev/shm/from_agent", O_RDWR);
+    // g_shared_memory_out = (char*) DO_SYSCALL(
+    //     mmap, NULL, SHARED_MEM_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, g_shm_fd_out, 0
+    // );
+    //  g_shared_memory_in = (char*) DO_SYSCALL(
+    //     mmap, NULL, SHARED_MEM_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, g_shm_fd_in, 0
+    // );
     g_shared_memory = (char*) DO_SYSCALL(
         mmap, NULL, SHARED_MEM_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, g_shm_fd, 0
     );
 }
 
-
 static void send_msg(char* msg, size_t size) {
-    int *spinlock = (int *)g_shared_memory;
-    char *shared_memory = g_shared_memory + sizeof(int);
-    *spinlock = 0;
+    char volatile *spinlock = g_shared_memory;
+    char volatile *gramine_interested = g_shared_memory + 1;
+    char volatile *agent_interested = g_shared_memory + 2;
+    char volatile *gramine_done = g_shared_memory + 3;
+    char volatile *agent_done = g_shared_memory + 4;
 
-    while (__sync_lock_test_and_set(spinlock, 1) != 0)
-           ; // Spinlock
+    char volatile *shared_memory = agent_done + 1;
 
-    ((int*)&shared_memory)[0] = size;
-    memcpy(msg, shared_memory + sizeof(int), size);
+    log_error("Send before lock, lock: %d, agent_interested: %d, size: %d",
+        *spinlock, *agent_interested, (shared_memory + sizeof(size_t))[0]
+    );
+    *gramine_interested = 1;
+    while (__sync_lock_test_and_set(spinlock, 1) != 0) {
+        log_error("Send waiting lock, lock: %d, agent_interested: %d, size: %d",
+               *spinlock, *agent_interested, (shared_memory + sizeof(size_t))[0]
+           );
+    }
+    log_error("Send lock, locked!: %d, agent_interested: %d, size: %d",
+               *spinlock, *agent_interested, (shared_memory + sizeof(size_t))[0]
+           );
+
+
+    ((size_t*)shared_memory)[0] = size;
+    memcpy(shared_memory + sizeof(size_t), msg, size);
+    log_error("HERE IS THE PROOF: %s", shared_memory +sizeof(size_t));
+    *gramine_done = 1;
+    *gramine_interested = 0;
     *spinlock = 0;
 }
 
-static void recieve_msg(char* buff) {
-    int *spinlock = (int *)g_shared_memory;
-    char *shared_memory = g_shared_memory + sizeof(int);
-    *spinlock = 0;
 
-    while (__sync_lock_test_and_set(spinlock, 1) != 0)
-           ; // Spinlock
+static int recieve_msg(char* buff) {
+    char volatile *spinlock = g_shared_memory;
+    char volatile *gramine_interested = g_shared_memory + 1;
+    char volatile *agent_interested = g_shared_memory + 2;
+    char volatile *gramine_done = g_shared_memory + 3;
+    char volatile *agent_done = g_shared_memory + 4;
 
-    size_t size = *((int*)shared_memory);
-    memcpy(shared_memory + sizeof(int), buff, size);
+    char volatile *shared_memory = agent_done + 1;
+
+
+    log_error("Receive before lock, lock: %d, agent_done: %d, size: %d",
+        *spinlock, *agent_done, (shared_memory + sizeof(size_t))[0]
+    );
+    *gramine_interested = 1;
+
+    while (*agent_done != 1) {
+        ;
+    }
+
+    while ((__sync_lock_test_and_set(spinlock, 1) != 0)) {
+        ;
+    }
+         log_error("Receive lock, locked!: %d, agent_done: %d, size: %d",
+               *spinlock, *agent_done, (shared_memory + sizeof(size_t))[0]
+           );
+
+    size_t size = *((size_t*)shared_memory);
+    memcpy(buff, shared_memory + sizeof(size_t), size);
+    *gramine_interested = 0;
+    *agent_done = 0;
     *spinlock = 0;
+    return size;
 }
+
+
+// static void send_msg(char* msg, size_t size) {
+//     int volatile *spinlock = (int *)g_shared_memory_out;
+//     int volatile *ready = (int*) (g_shared_memory_out + sizeof(int));
+//     char volatile *shared_memory = g_shared_memory_out + 2 * sizeof(int);
+
+//     log_error("Send before lock, lock: %d, ready: %d, size: %d",
+//         *spinlock, *ready, (shared_memory + sizeof(size_t))[0]
+//     );
+//     while (__sync_lock_test_and_set(spinlock, 1) != 0) {
+//         log_error("Send waiting lock, lock: %d, ready: %d, size: %d",
+//                *spinlock, *ready, (shared_memory + sizeof(size_t))[0]
+//            );
+//     }
+//     log_error("Send lock, locked!: %d, ready: %d, size: %d",
+//                *spinlock, *ready, (shared_memory + sizeof(size_t))[0]
+//            );
+
+
+//     ((size_t*)shared_memory)[0] = size;
+//     memcpy(shared_memory + sizeof(size_t), msg, size);
+//     log_error("HERE IS THE PROOF: %s", shared_memory +sizeof(size_t));
+//     *ready = 1;
+//     *spinlock = 0;
+// }
+
+// static int recieve_msg(char* buff) {
+//     int volatile *spinlock = (int *)g_shared_memory_in;
+//     int volatile *ready = (int*) (g_shared_memory_in + sizeof(int));
+//     char volatile *shared_memory = g_shared_memory_in + 2 * sizeof(int);
+
+//     log_error("Receive before lock, lock: %d, ready: %d, size: %d",
+//         *spinlock, *ready, (shared_memory + sizeof(size_t))[0]
+//     );
+//     while ((__sync_lock_test_and_set(spinlock, 1) != 0) && (*ready == 1)) {
+//           log_error("Receive waiting lock, lock: %d, ready: %d, size: %d",
+//                *spinlock, *ready, (shared_memory + sizeof(size_t))[0]
+//            );
+//     }
+//          log_error("Receive lock, locked!: %d, ready: %d, size: %d",
+//                *spinlock, *ready, (shared_memory + sizeof(size_t))[0]
+//            );
+
+//     size_t size = *((size_t*)shared_memory);
+//     memcpy(buff, shared_memory + sizeof(size_t), size);
+//     *ready = 0;
+//     *spinlock = 0;
+//     return size;
+// }
 
 
 
@@ -447,17 +549,18 @@ long do_syscall_intr_wrapped(long nr, ...)
 
         log_always("Message to send: %s | len: %zu", buff, msg_len);
 
-        ret = DO_SYSCALL_INTERRUPTIBLE_ORIG(
-            sendto, sock_fd,
-            buff, msg_len,
-            0, (struct sockaddr *) &sv_addr,
-            sizeof(struct sockaddr_un)
-        );
+        // ret = DO_SYSCALL_INTERRUPTIBLE_ORIG(
+        //     sendto, sock_fd,
+        //     buff, msg_len,
+        //     0, (struct sockaddr *) &sv_addr,
+        //     sizeof(struct sockaddr_un)
+        // );
+        send_msg(buff, msg_len);
         
-        if (ret != (int) msg_len) {
-            log_error("send failed: %zu != %d", msg_len, ret);
-            abort();
-        }
+        // if (ret != (int) msg_len) {
+        //     log_error("send failed: %zu != %d", msg_len, ret);
+        //     abort();
+        // }
 
         for (int i = 0; i < BUFF_SIZE; i++) {
             buff[i] = 0;
@@ -465,14 +568,15 @@ long do_syscall_intr_wrapped(long nr, ...)
 
         log_debug("Waiting for result for nr: %ld", nr);
 
-        ret = DO_SYSCALL_INTERRUPTIBLE_ORIG(
-            recvfrom, sock_fd, buff, BUFF_SIZE, 0, NULL, NULL
-        );
+        // ret = DO_SYSCALL_INTERRUPTIBLE_ORIG(
+        //     recvfrom, sock_fd, buff, BUFF_SIZE, 0, NULL, NULL
+        // );
+        ret = recieve_msg(buff);
 
-        if (ret <= 0) {
-            log_error("recvfrom error");
-            abort();
-        }
+        // if (ret <= 0) {
+        //     log_error("recvfrom error");
+        //     abort();
+        // }
 
         log_debug("RET SIZE: %d", ret);
         size_t offset = ret - REGISTER_SIZE;
