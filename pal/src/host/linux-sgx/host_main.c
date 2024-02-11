@@ -1049,7 +1049,8 @@ static int load_enclave(struct pal_enclave* enclave, char* args, size_t args_siz
         log_always("----- SGX enclave loading time = %10lu microseconds -----",
                    end_time - start_time);
     }
-
+    // DO_SYSCALL(mkdir, "/tmp/fuse//message1234");
+    // log_error("HERE HERE\n\n\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
     /* start running trusted PAL */
     ecall_enclave_start(enclave->libpal_uri, args, args_size, env, env_size, parent_stream_fd,
                         &qe_targetinfo, &topo_info, &dns_conf, enclave->edmm_enabled,

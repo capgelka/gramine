@@ -58,34 +58,30 @@ static void init_shm() {
     g_shared_memory = (char*) DO_SYSCALL(
         mmap, NULL, SHARED_MEM_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, g_shm_fd, 0
     );
+    g_shared_memory[2] = 1;
 }
 
 static void send_msg(char* msg, size_t size) {
     char volatile *spinlock = g_shared_memory;
     char volatile *gramine_interested = g_shared_memory + 1;
-    char volatile *agent_interested = g_shared_memory + 2;
+    char volatile *start_interception = g_shared_memory + 2;
     char volatile *gramine_done = g_shared_memory + 3;
     char volatile *agent_done = g_shared_memory + 4;
 
     char volatile *shared_memory = agent_done + 1;
 
-    log_error("Send before lock, lock: %d, agent_interested: %d, size: %d",
-        *spinlock, *agent_interested, (shared_memory + sizeof(size_t))[0]
-    );
     *gramine_interested = 1;
     while (__sync_lock_test_and_set(spinlock, 1) != 0) {
-        log_error("Send waiting lock, lock: %d, agent_interested: %d, size: %d",
-               *spinlock, *agent_interested, (shared_memory + sizeof(size_t))[0]
+        log_debug("Send waiting lock, lock: %d, start_interception: %d, size: %d",
+               *spinlock, *start_interception, (shared_memory + sizeof(size_t))[0]
            );
     }
-    log_error("Send lock, locked!: %d, agent_interested: %d, size: %d",
-               *spinlock, *agent_interested, (shared_memory + sizeof(size_t))[0]
-           );
 
 
     ((size_t*)shared_memory)[0] = size;
     memcpy(shared_memory + sizeof(size_t), msg, size);
-    log_error("HERE IS THE PROOF: %s", shared_memory +sizeof(size_t));
+    log_always("DO_SYSCALL_INTERRUPTIBLE sent: %s", shared_memory +sizeof(size_t));
+    //log_always("SHARED_ADDR: %p [%p]", g_shared_memory, &g_shared_memory);
     *gramine_done = 1;
     *gramine_interested = 0;
     *spinlock = 0;
@@ -95,16 +91,13 @@ static void send_msg(char* msg, size_t size) {
 static int recieve_msg(char* buff) {
     char volatile *spinlock = g_shared_memory;
     char volatile *gramine_interested = g_shared_memory + 1;
-    char volatile *agent_interested = g_shared_memory + 2;
+    char volatile *start_interception = g_shared_memory + 2;
     char volatile *gramine_done = g_shared_memory + 3;
     char volatile *agent_done = g_shared_memory + 4;
 
     char volatile *shared_memory = agent_done + 1;
 
 
-    log_error("Receive before lock, lock: %d, agent_done: %d, size: %d",
-        *spinlock, *agent_done, (shared_memory + sizeof(size_t))[0]
-    );
     *gramine_interested = 1;
 
     while (*agent_done != 1) {
@@ -114,12 +107,11 @@ static int recieve_msg(char* buff) {
     while ((__sync_lock_test_and_set(spinlock, 1) != 0)) {
         ;
     }
-         log_error("Receive lock, locked!: %d, agent_done: %d, size: %d",
-               *spinlock, *agent_done, (shared_memory + sizeof(size_t))[0]
-           );
 
     size_t size = *((size_t*)shared_memory);
     memcpy(buff, shared_memory + sizeof(size_t), size);
+    explicit_bzero(shared_memory, size + sizeof(size_t));
+    log_always("DO_SYSCALL_INTERRUPTIBLE received %d bytes", size);
     *gramine_interested = 0;
     *agent_done = 0;
     *spinlock = 0;
@@ -127,91 +119,40 @@ static int recieve_msg(char* buff) {
 }
 
 
-// static void send_msg(char* msg, size_t size) {
-//     int volatile *spinlock = (int *)g_shared_memory_out;
-//     int volatile *ready = (int*) (g_shared_memory_out + sizeof(int));
-//     char volatile *shared_memory = g_shared_memory_out + 2 * sizeof(int);
-
-//     log_error("Send before lock, lock: %d, ready: %d, size: %d",
-//         *spinlock, *ready, (shared_memory + sizeof(size_t))[0]
-//     );
-//     while (__sync_lock_test_and_set(spinlock, 1) != 0) {
-//         log_error("Send waiting lock, lock: %d, ready: %d, size: %d",
-//                *spinlock, *ready, (shared_memory + sizeof(size_t))[0]
-//            );
+// static int init_socket_int(struct sockaddr_un* cl_addr, struct sockaddr_un* sv_addr)
+// {
+//     DO_SYSCALL_INTERRUPTIBLE_ORIG(unlink, CLIENT_SOCK);
+//     int sock_fd = DO_SYSCALL_INTERRUPTIBLE_ORIG(socket, AF_UNIX, SOCK_DGRAM, 0);
+//     if (sock_fd < 0) {
+//         log_error("FAILED TO OPEN FILE TO WRITE DATA FOR AGENT");
+//         abort();
 //     }
-//     log_error("Send lock, locked!: %d, ready: %d, size: %d",
-//                *spinlock, *ready, (shared_memory + sizeof(size_t))[0]
-//            );
 
-
-//     ((size_t*)shared_memory)[0] = size;
-//     memcpy(shared_memory + sizeof(size_t), msg, size);
-//     log_error("HERE IS THE PROOF: %s", shared_memory +sizeof(size_t));
-//     *ready = 1;
-//     *spinlock = 0;
-// }
-
-// static int recieve_msg(char* buff) {
-//     int volatile *spinlock = (int *)g_shared_memory_in;
-//     int volatile *ready = (int*) (g_shared_memory_in + sizeof(int));
-//     char volatile *shared_memory = g_shared_memory_in + 2 * sizeof(int);
-
-//     log_error("Receive before lock, lock: %d, ready: %d, size: %d",
-//         *spinlock, *ready, (shared_memory + sizeof(size_t))[0]
-//     );
-//     while ((__sync_lock_test_and_set(spinlock, 1) != 0) && (*ready == 1)) {
-//           log_error("Receive waiting lock, lock: %d, ready: %d, size: %d",
-//                *spinlock, *ready, (shared_memory + sizeof(size_t))[0]
-//            );
+//     for (size_t i = 0; i < sizeof(struct sockaddr_un); i++) {
+//         ((char*)cl_addr)[i] = 0;
+//         ((char*)sv_addr)[i] = 0;
 //     }
-//          log_error("Receive lock, locked!: %d, ready: %d, size: %d",
-//                *spinlock, *ready, (shared_memory + sizeof(size_t))[0]
-//            );
 
-//     size_t size = *((size_t*)shared_memory);
-//     memcpy(buff, shared_memory + sizeof(size_t), size);
-//     *ready = 0;
-//     *spinlock = 0;
-//     return size;
+//     cl_addr->sun_family = AF_UNIX;
+//     memcpy(cl_addr->sun_path, CLIENT_SOCK, sizeof(CLIENT_SOCK));
+
+//     int ret = DO_SYSCALL_INTERRUPTIBLE_ORIG(
+//         bind,
+//         sock_fd,
+//         (const struct sockaddr *) cl_addr,
+//         sizeof(struct sockaddr_un)
+//     );
+
+//     if (ret < 0) {
+//         log_error("Server is down: %d", ret);
+//         log_error("Path: |%s|", cl_addr->sun_path);
+//         abort();
+//     }
+
+//     sv_addr->sun_family = AF_UNIX;
+//     memcpy(sv_addr->sun_path, SERVER_SOCK, sizeof(SERVER_SOCK));
+//     return sock_fd;
 // }
-
-
-
-static int init_socket_int(struct sockaddr_un* cl_addr, struct sockaddr_un* sv_addr)
-{
-    DO_SYSCALL_INTERRUPTIBLE_ORIG(unlink, CLIENT_SOCK);
-    int sock_fd = DO_SYSCALL_INTERRUPTIBLE_ORIG(socket, AF_UNIX, SOCK_DGRAM, 0);
-    if (sock_fd < 0) {
-        log_error("FAILED TO OPEN FILE TO WRITE DATA FOR AGENT");
-        abort();
-    }
-
-    for (size_t i = 0; i < sizeof(struct sockaddr_un); i++) {
-        ((char*)cl_addr)[i] = 0;
-        ((char*)sv_addr)[i] = 0;
-    }
-
-    cl_addr->sun_family = AF_UNIX;
-    memcpy(cl_addr->sun_path, CLIENT_SOCK, sizeof(CLIENT_SOCK));
-
-    int ret = DO_SYSCALL_INTERRUPTIBLE_ORIG(
-        bind,
-        sock_fd,
-        (const struct sockaddr *) cl_addr,
-        sizeof(struct sockaddr_un)
-    );
-
-    if (ret < 0) {
-        log_error("Server is down: %d", ret);
-        log_error("Path: |%s|", cl_addr->sun_path);
-        abort();
-    }
-
-    sv_addr->sun_family = AF_UNIX;
-    memcpy(sv_addr->sun_path, SERVER_SOCK, sizeof(SERVER_SOCK));
-    return sock_fd;
-}
 
 static void show_stats(const struct stat* stats)
 {
@@ -228,7 +169,7 @@ static void show_stats(const struct stat* stats)
 __attribute_no_stack_protector
 long do_syscall_intr_wrapped(long nr, ...)
 {
-    static _Thread_local int sock_fd = 0;
+    static _Thread_local int shm_ready = 0;
     static _Thread_local struct sockaddr_un cl_addr = { .sun_family = AF_UNIX };
     static _Thread_local struct sockaddr_un sv_addr = { .sun_family = AF_UNIX };
     static _Thread_local int on_syscall = 0;
@@ -290,6 +231,11 @@ long do_syscall_intr_wrapped(long nr, ...)
             else {
                 log_always("NOT RANDOM: %s", path);
             }
+
+            if (strstr(path, ARG_TO_SWITCH)) {
+                log_always("Ignore initialization open");
+                goto internal_syscall;
+            }
         }
 
         if (!enable_hooks && (nr == SYSCALL_TO_SWITCH)) {
@@ -337,27 +283,12 @@ long do_syscall_intr_wrapped(long nr, ...)
             goto passthrough_syscall;
         }
 
-        if (!sock_fd) {
-            int count = DESCRIPTORS_TO_RESERVE;
-            while (count-->0) {
-                dst[count] = DO_SYSCALL_INTERRUPTIBLE_ORIG(
-                    open, "/tmp/tmpp",
-                    O_RDWR | O_CREAT,
-                    0777
-                );
-                on_syscall = 1;
-            }
-
+        if (!shm_ready) {
             on_syscall = 1;
-            sock_fd = init_socket_int(&cl_addr, &sv_addr);
             init_shm();
-            log_debug("Received sock_fd value: %d", sock_fd);
+            shm_ready = 1;
+            log_debug("shm_ready value: %d", shm_ready);
             on_syscall = 0;
-            
-
-            for (int i = 0; i < DESCRIPTORS_TO_RESERVE; i++) {
-                DO_SYSCALL_INTERRUPTIBLE_ORIG(close, dst[i]);
-            }
         }
 
         not_handle = 0;

@@ -21,13 +21,14 @@
 #define BUFF_SIZE 8192
 #define REGISTER_SIZE 8
 #define DESCRIPTORS_TO_RESERVE 50
-#define SYSCALL_TO_SWITCH SYS_mkdir
+#define SYSCALL_TO_SWITCH SYS_open
 #define ARG_TO_SWITCH "/message1234"
 
 
 #define SHARED_MEM_SIZE 8192
 
 int g_shm_fd1;
+// extern char volatile g_shared_memory;
 char volatile * g_shared_memory1 = NULL;
 
 #ifdef FUZZER
@@ -56,48 +57,56 @@ static void init_shm() {
 static void send_msg(char* msg, size_t size) {
     char volatile *spinlock = g_shared_memory1;
     char volatile *gramine_interested = g_shared_memory1 + 1;
-    char volatile *agent_interested = g_shared_memory1 + 2;
+    char volatile *start_interception = g_shared_memory1 + 2;
     char volatile *gramine_done = g_shared_memory1 + 3;
     char volatile *agent_done = g_shared_memory1 + 4;
 
     char volatile *shared_memory = agent_done + 1;
 
-    log_error("Send before lock, lock: %d, agent_interested: %d, size: %d",
-        *spinlock, *agent_interested, (shared_memory + sizeof(size_t))[0]
-    );
     *gramine_interested = 1;
     while (__sync_lock_test_and_set(spinlock, 1) != 0) {
-        log_error("Send waiting lock, lock: %d, agent_interested: %d, size: %d",
-               *spinlock, *agent_interested, (shared_memory + sizeof(size_t))[0]
+        log_debug("Send waiting lock, lock: %d, start_interception: %d, size: %d",
+               *spinlock, *start_interception, (shared_memory + sizeof(size_t))[0]
            );
     }
-    log_error("Send lock, locked!: %d, agent_interested: %d, size: %d",
-               *spinlock, *agent_interested, (shared_memory + sizeof(size_t))[0]
-           );
-
 
     ((size_t*)shared_memory)[0] = size;
     memcpy(shared_memory + sizeof(size_t), msg, size);
-    log_error("HERE IS THE PROOF: %s", shared_memory +sizeof(size_t));
+    log_error("DO_SYSCALL sent: %s", shared_memory +sizeof(size_t));
     *gramine_done = 1;
     *gramine_interested = 0;
     *spinlock = 0;
+}
+
+static bool time_to_start() {
+    // g_shared_memory1 = g_shared_memory;
+    char** hardcoded_addr = 0x55555558e8b0;
+    if (*hardcoded_addr == NULL) {
+        return false;
+    }
+    g_shared_memory1 = *hardcoded_addr;
+    // if (g_shared_memory1 == NULL) {
+    //     return false;
+    // }
+    //g_shared_memory1 = 0x7ffff7fb4000;
+
+    char volatile *start_interception = g_shared_memory1 + 2;
+
+    log_always("Check if it's time to start hooking (for DO_SYSCALL): %d", *start_interception);
+    return (bool)*start_interception;
 }
 
 
 static int recieve_msg(char* buff) {
     char volatile *spinlock = g_shared_memory1;
     char volatile *gramine_interested = g_shared_memory1 + 1;
-    char volatile *agent_interested = g_shared_memory1 + 2;
+    char volatile *start_interception = g_shared_memory1 + 2;
     char volatile *gramine_done = g_shared_memory1 + 3;
     char volatile *agent_done = g_shared_memory1 + 4;
 
     char volatile *shared_memory = agent_done + 1;
 
 
-    log_error("Receive before lock, lock: %d, agent_done: %d, size: %d",
-        *spinlock, *agent_done, (shared_memory + sizeof(size_t))[0]
-    );
     *gramine_interested = 1;
 
     while (*agent_done != 1) {
@@ -107,52 +116,15 @@ static int recieve_msg(char* buff) {
     while ((__sync_lock_test_and_set(spinlock, 1) != 0)) {
         ;
     }
-         log_error("Receive lock, locked!: %d, agent_done: %d, size: %d",
-               *spinlock, *agent_done, (shared_memory + sizeof(size_t))[0]
-           );
 
     size_t size = *((size_t*)shared_memory);
     memcpy(buff, shared_memory + sizeof(size_t), size);
+    memset(shared_memory, 0, size + sizeof(size_t));
+    log_always("DO_SYSCALL received %d bytes", size);
     *gramine_interested = 0;
     *agent_done = 0;
     *spinlock = 0;
     return size;
-}
-
-
-static int init_socket(struct sockaddr_un* cl_addr, struct sockaddr_un* sv_addr)
-{
-    DO_SYSCALL_ORIG(unlink, CLIENT_SOCK);
-    int sock_fd = DO_SYSCALL_ORIG(socket, AF_UNIX, SOCK_DGRAM, 0);
-    if (sock_fd < 0) {
-        log_error("FAILED TO OPEN FILE TO WRITE DATA FOR AGENT");
-        abort();
-    }
-
-    for (size_t i = 0; i < sizeof(struct sockaddr_un); i++) {
-        ((char*)cl_addr)[i] = 0;
-        ((char*)sv_addr)[i] = 0;
-    }
-
-    cl_addr->sun_family = AF_UNIX;
-    memcpy(cl_addr->sun_path, CLIENT_SOCK, sizeof(CLIENT_SOCK));
-
-    int ret = DO_SYSCALL_ORIG(
-        bind,
-        sock_fd,
-        (const struct sockaddr *) cl_addr,
-        sizeof(struct sockaddr_un)
-    );
-
-    if (ret < 0) {
-        log_error("Server is down: %d", ret);
-        log_error("Path: |%s|", cl_addr->sun_path);
-        abort();
-    }
-
-    sv_addr->sun_family = AF_UNIX;
-    memcpy(sv_addr->sun_path, SERVER_SOCK, sizeof(SERVER_SOCK));
-    return sock_fd;
 }
 
 static void show_stats(const struct stat* stats)
@@ -170,7 +142,7 @@ static void show_stats(const struct stat* stats)
 __attribute_no_stack_protector
 inline long do_syscall_wrapped(long nr, int num_args, ...)
 {
-    static int sock_fd = 0;
+    static int shm_ready = 0;
     static struct sockaddr_un cl_addr = { .sun_family = AF_UNIX };
     static struct sockaddr_un sv_addr = { .sun_family = AF_UNIX };
     static int on_syscall = 0;
@@ -270,6 +242,8 @@ inline long do_syscall_wrapped(long nr, int num_args, ...)
 
         not_handle = 1;
 
+        enable_hooks |= time_to_start();
+
         if (!enable_hooks) {
     
             not_handle = 0;
@@ -277,27 +251,12 @@ inline long do_syscall_wrapped(long nr, int num_args, ...)
             goto passthrough_syscall;
         }
 
-        if (!sock_fd) {
-            int count = DESCRIPTORS_TO_RESERVE;
-            while (count-->0) {
-                dst[count] = DO_SYSCALL_ORIG(
-                    open, "/tmp/tmpp",
-                    O_RDWR | O_CREAT,
-                    0777
-                );
-                on_syscall = 1;
-            }
-
+        if (!shm_ready && time_to_start()) {
             on_syscall = 1;
-            sock_fd = init_socket(&cl_addr, &sv_addr);
             init_shm();
-            log_debug("Received sock_fd value: %d", sock_fd);
+            shm_ready = 1;
+            log_debug("Received    shm_ready value: %d",   shm_ready);
             on_syscall = 0;
-            
-
-            for (int i = 0; i < DESCRIPTORS_TO_RESERVE; i++) {
-                DO_SYSCALL_ORIG(close, dst[i]);
-            }
         }
 
         not_handle = 0;
@@ -490,7 +449,7 @@ inline long do_syscall_wrapped(long nr, int num_args, ...)
         log_always("Message to send: %s | len: %zu", buff, msg_len);
 
         // ret = DO_SYSCALL_ORIG(
-        //     sendto, sock_fd,
+        //     sendto, shm_ready,
         //     buff, msg_len,
         //     0, (struct sockaddr *) &sv_addr,
         //     sizeof(struct sockaddr_un)
@@ -508,7 +467,7 @@ inline long do_syscall_wrapped(long nr, int num_args, ...)
         log_debug("Waiting for result for nr: %ld", nr);
 
         // ret = DO_SYSCALL_ORIG(
-        //     recvfrom, sock_fd, buff, BUFF_SIZE, 0, NULL, NULL
+        //     recvfrom,   shm_ready, buff, BUFF_SIZE, 0, NULL, NULL
         // );
         ret = recieve_msg(buff);
         // if (ret <= 0) {
