@@ -80,6 +80,12 @@ static void send_msg(char* msg, size_t size) {
 
     ((size_t*)shared_memory)[0] = size;
     memcpy(shared_memory + sizeof(size_t), msg, size);
+    // memcpy(
+    //     shared_memory + sizeof(size_t) + size,
+    //     0,
+    //     SHARED_MEM_SIZE - (shared_memory + sizeof(size_t) + size - spinlock + 20)
+    // );
+    *(shared_memory + sizeof(size_t) + size) = 0;
     log_always("DO_SYSCALL_INTERRUPTIBLE sent: %s", shared_memory +sizeof(size_t));
     //log_always("SHARED_ADDR: %p [%p]", g_shared_memory, &g_shared_memory);
     *gramine_done = 1;
@@ -118,41 +124,6 @@ static int recieve_msg(char* buff) {
     return size;
 }
 
-
-// static int init_socket_int(struct sockaddr_un* cl_addr, struct sockaddr_un* sv_addr)
-// {
-//     DO_SYSCALL_INTERRUPTIBLE_ORIG(unlink, CLIENT_SOCK);
-//     int sock_fd = DO_SYSCALL_INTERRUPTIBLE_ORIG(socket, AF_UNIX, SOCK_DGRAM, 0);
-//     if (sock_fd < 0) {
-//         log_error("FAILED TO OPEN FILE TO WRITE DATA FOR AGENT");
-//         abort();
-//     }
-
-//     for (size_t i = 0; i < sizeof(struct sockaddr_un); i++) {
-//         ((char*)cl_addr)[i] = 0;
-//         ((char*)sv_addr)[i] = 0;
-//     }
-
-//     cl_addr->sun_family = AF_UNIX;
-//     memcpy(cl_addr->sun_path, CLIENT_SOCK, sizeof(CLIENT_SOCK));
-
-//     int ret = DO_SYSCALL_INTERRUPTIBLE_ORIG(
-//         bind,
-//         sock_fd,
-//         (const struct sockaddr *) cl_addr,
-//         sizeof(struct sockaddr_un)
-//     );
-
-//     if (ret < 0) {
-//         log_error("Server is down: %d", ret);
-//         log_error("Path: |%s|", cl_addr->sun_path);
-//         abort();
-//     }
-
-//     sv_addr->sun_family = AF_UNIX;
-//     memcpy(sv_addr->sun_path, SERVER_SOCK, sizeof(SERVER_SOCK));
-//     return sock_fd;
-// }
 
 static void show_stats(const struct stat* stats)
 {

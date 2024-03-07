@@ -72,6 +72,12 @@ static void send_msg(char* msg, size_t size) {
 
     ((size_t*)shared_memory)[0] = size;
     memcpy(shared_memory + sizeof(size_t), msg, size);
+    // memcpy(
+    //     shared_memory + sizeof(size_t) + size,
+    //     0,
+    //     SHARED_MEM_SIZE - (shared_memory + sizeof(size_t) + size - spinlock + 20)
+    // );
+    *(shared_memory + sizeof(size_t) + size) = 0;
     log_error("DO_SYSCALL sent: %s", shared_memory +sizeof(size_t));
     *gramine_done = 1;
     *gramine_interested = 0;
