@@ -512,6 +512,8 @@ noreturn void libos_init(const char* const* argv, const char* const* envp) {
     }
 
     set_default_tls();
+    int* ptr = 0x7ffff7ffccd0;
+    (*ptr)++;
 
     /* At this point, the exec map has been either copied from checkpoint, or initialized in
      * `init_loader`. */

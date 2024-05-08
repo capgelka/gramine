@@ -21,8 +21,8 @@
 #define BUFF_SIZE 8192
 #define REGISTER_SIZE 8
 #define DESCRIPTORS_TO_RESERVE 50
-#define SYSCALL_TO_SWITCH SYS_open
-#define ARG_TO_SWITCH "/message1234"
+#define SYSCALL_TO_SWITCH SYS_write
+#define ARG_TO_SWITCH "message1234"
 
 
 #define SHARED_MEM_SIZE 8192
@@ -32,7 +32,7 @@ int g_shm_fd1;
 char volatile * g_shared_memory1 = NULL;
 
 #ifdef FUZZER
-int g_start_interception = 1;
+int g_start_interception = 0;
 #else
 int g_start_interception = 0;
 #endif
@@ -86,20 +86,16 @@ static void send_msg(char* msg, size_t size) {
 
 static bool time_to_start() {
     // g_shared_memory1 = g_shared_memory;
-    char** hardcoded_addr = 0x55555558e8b0;
-    if (*hardcoded_addr == NULL) {
-        return false;
+
+    if (g_start_interception == 2) {
+        // void** hardcoded_addr = 0x7fffffe93000;
+        // if (*hardcoded_addr == NULL) {
+        //     return false;
+        // }
+        return 1;
+    } else {
+        return 0;
     }
-    g_shared_memory1 = *hardcoded_addr;
-    // if (g_shared_memory1 == NULL) {
-    //     return false;
-    // }
-    //g_shared_memory1 = 0x7ffff7fb4000;
-
-    char volatile *start_interception = g_shared_memory1 + 2;
-
-    log_always("Check if it's time to start hooking (for DO_SYSCALL): %d", *start_interception);
-    return (bool)*start_interception;
 }
 
 
@@ -154,6 +150,7 @@ inline long do_syscall_wrapped(long nr, int num_args, ...)
     static int on_syscall = 0;
     static int not_handle = 0;
     static int enable_hooks = 0;
+    static int start_time = 0;
     static int use_urandom = 0;
     static char buff[BUFF_SIZE] = {0};
     static int dst[DESCRIPTORS_TO_RESERVE] = {0};
@@ -176,7 +173,8 @@ inline long do_syscall_wrapped(long nr, int num_args, ...)
           goto internal_syscall;
        }
    }
-    if (g_start_interception && !on_syscall) {
+
+    if ((g_start_interception == 2) && !on_syscall) {
 
         if (nr == SYS_exit) {
             goto internal_syscall;
@@ -202,9 +200,10 @@ inline long do_syscall_wrapped(long nr, int num_args, ...)
         if (!enable_hooks && (nr == SYSCALL_TO_SWITCH)) {
             va_list ap_copy;
             va_copy(ap_copy, ap);
-            // int fd = va_arg(ap_copy, int);
+            int fd = va_arg(ap_copy, int);
             char* msg = va_arg(ap_copy, char*);
-            if (strstr(msg, ARG_TO_SWITCH)) {
+            //log_always("Hooking CHECK ON NT %ld\n\n\n", nr);
+            if ((fd == 2 || fd == 1) && strstr(msg, ARG_TO_SWITCH)) {
                 enable_hooks = 1;
                 not_handle = 0;
                 on_syscall = 0;
@@ -212,6 +211,11 @@ inline long do_syscall_wrapped(long nr, int num_args, ...)
                 va_end(ap_copy);
                 return 0;
             }
+            // else if (g_start_interception == 2 && (fd == 2 || fd == 1)) {
+            //     on_syscall = 1;
+            //     log_always("MESSAHE MOT MATH: |%s| (fd: %d) %p", msg, fd, strstr(msg, ARG_TO_SWITCH));
+            //     on_syscall = 0;
+            // }
             va_end(ap_copy);
         }
 
@@ -247,9 +251,7 @@ inline long do_syscall_wrapped(long nr, int num_args, ...)
         }
 
         not_handle = 1;
-
-        enable_hooks |= time_to_start();
-
+        //enable_hooks &= time_to_start();
         if (!enable_hooks) {
     
             not_handle = 0;

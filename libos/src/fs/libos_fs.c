@@ -80,6 +80,7 @@ int init_fs(void) {
     if ((ret = init_etcfs()) < 0)
         goto err;
 
+    log_always("USE TJHIS HARDODED {%p}", g_mount_mgr);
     return 0;
 
 err:
@@ -345,7 +346,6 @@ int init_mount_root(void) {
     ret = mount_sys();
     if (ret < 0)
         return ret;
-
     return 0;
 }
 
